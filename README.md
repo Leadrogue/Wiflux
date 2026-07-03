@@ -15,6 +15,7 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/Leadrogue/Wiflux?label=download)](https://github.com/Leadrogue/Wiflux/releases/latest)
 
 ---
 
@@ -45,20 +46,39 @@
 
 ## Quick start
 
+### Install from release (recommended)
+
+Download the latest release from **[GitHub Releases](https://github.com/Leadrogue/Wiflux/releases/latest)**:
+
 ```bash
-# Clone and install
-git clone https://github.com/Leadrogue/Wiflux.git
-cd wiflux
-pip install -e . --break-system-packages
-
-# Interactive audit
-sudo wiflux --kill --restore
-
-# Auto-attack after 30s scan
-sudo wiflux --auto -p 30
+# Download and install the Linux installer bundle
+tar -xzf wiflux-1.0.0-linux-installer.tar.gz
+cd wiflux-1.0.0-linux-installer
+./install.sh
 ```
 
-See the full [Installation Guide](INSTALL.md) and [Tutorial](docs/TUTORIAL.md).
+Or install directly with pip:
+
+```bash
+pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.0/wiflux-1.0.0-py3-none-any.whl --break-system-packages
+```
+
+### Install from source
+
+```bash
+git clone https://github.com/Leadrogue/Wiflux.git
+cd Wiflux
+pip install -e . --break-system-packages
+```
+
+### Run
+
+```bash
+sudo wiflux --kill --restore      # Interactive audit
+sudo wiflux --auto -p 30          # Auto-attack after 30s scan
+```
+
+See the full [Installation Guide](INSTALL.md), [Release downloads](docs/RELEASE.md), and [Tutorial](docs/TUTORIAL.md).
 
 ---
 
@@ -67,6 +87,7 @@ See the full [Installation Guide](INSTALL.md) and [Tutorial](docs/TUTORIAL.md).
 | Document | Description |
 |----------|-------------|
 | [INSTALL.md](INSTALL.md) | Requirements, adapter setup, wordlists, troubleshooting |
+| [docs/RELEASE.md](docs/RELEASE.md) | Download and install from GitHub Releases |
 | [docs/TUTORIAL.md](docs/TUTORIAL.md) | Step-by-step walkthrough from first run to attacks |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup and pull request guidelines |
 

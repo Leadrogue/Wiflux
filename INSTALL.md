@@ -53,13 +53,49 @@ Wiflux checks for missing dependencies at startup and can offer to install them 
 
 ---
 
+## Install from GitHub Release (recommended)
+
+Download the latest release from **[GitHub Releases](https://github.com/Leadrogue/Wiflux/releases/latest)**.
+
+### Option A — Linux installer bundle
+
+Includes the wheel, install script, and quick-start docs:
+
+```bash
+tar -xzf wiflux-1.0.0-linux-installer.tar.gz
+cd wiflux-1.0.0-linux-installer
+./install.sh
+```
+
+### Option B — pip from wheel
+
+```bash
+pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.0/wiflux-1.0.0-py3-none-any.whl --break-system-packages
+```
+
+### Option C — pip from source tarball
+
+```bash
+pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.0/wiflux-1.0.0.tar.gz --break-system-packages
+```
+
+### Verify checksums
+
+```bash
+sha256sum -c wiflux-1.0.0-checksums.sha256
+```
+
+See [docs/RELEASE.md](docs/RELEASE.md) for full release details.
+
+---
+
 ## Install from source
 
 ### 1. Clone the repository
 
 ```bash
 git clone https://github.com/Leadrogue/Wiflux.git
-cd wiflux
+cd Wiflux
 ```
 
 ### 2. Install the Python package
