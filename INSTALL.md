@@ -58,7 +58,7 @@ Wiflux checks for missing dependencies at startup and can offer to install them 
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/Leadrogue/wiflux.git
+git clone https://github.com/Leadrogue/Wiflux.git
 cd wiflux
 ```
 
