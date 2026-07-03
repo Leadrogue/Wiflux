@@ -2,7 +2,7 @@
 # Publish Wiflux to GitHub. Requires GH_TOKEN or prior `gh auth login`.
 set -euo pipefail
 
-REPO_OWNER="${1:-spryoung2003}"
+REPO_OWNER="${1:-Leadrogue}"
 REPO_NAME="${2:-wiflux}"
 
 if ! command -v gh >/dev/null 2>&1; then

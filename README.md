@@ -47,7 +47,7 @@
 
 ```bash
 # Clone and install
-git clone https://github.com/spryoung2003/wiflux.git
+git clone https://github.com/Leadrogue/wiflux.git
 cd wiflux
 pip install -e . --break-system-packages
 

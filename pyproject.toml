@@ -28,10 +28,10 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/spryoung2003/wiflux"
-Documentation = "https://github.com/spryoung2003/wiflux/blob/main/docs/TUTORIAL.md"
-Repository = "https://github.com/spryoung2003/wiflux"
-Issues = "https://github.com/spryoung2003/wiflux/issues"
+Homepage = "https://github.com/Leadrogue/wiflux"
+Documentation = "https://github.com/Leadrogue/wiflux/blob/main/docs/TUTORIAL.md"
+Repository = "https://github.com/Leadrogue/wiflux"
+Issues = "https://github.com/Leadrogue/wiflux/issues"
 
 [project.scripts]
 wiflux = "wiflux.cli:main"

@@ -11,7 +11,7 @@ Thank you for your interest in improving Wiflux. This project welcomes bug repor
 ## Development setup
 
 ```bash
-git clone https://github.com/spryoung2003/wiflux.git
+git clone https://github.com/Leadrogue/wiflux.git
 cd wiflux
 python3 -m venv .venv
 source .venv/bin/activate
