@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wiflux"
+version = "1.0.0"
+description = "Modern wireless security auditor with live Rich UI and smart attack orchestration"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = ["rich>=13.0"]
+keywords = ["wifi", "wireless", "security", "pentest", "wpa", "wps", "aircrack-ng"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: System :: Networking",
+]
+
+[project.urls]
+Homepage = "https://github.com/YOUR_USERNAME/wiflux"
+Documentation = "https://github.com/YOUR_USERNAME/wiflux/blob/main/docs/TUTORIAL.md"
+Repository = "https://github.com/YOUR_USERNAME/wiflux"
+Issues = "https://github.com/YOUR_USERNAME/wiflux/issues"
+
+[project.scripts]
+wiflux = "wiflux.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["wiflux*"]

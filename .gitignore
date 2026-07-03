@@ -1,0 +1,44 @@
+# Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Packaging
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# Runtime data (captures, database, logs)
+wiflux-data/
+hs/
+*.cap
+*.pcap
+*.pcapng
+*.22000
+*.16800
+*.hccapx
+*.log
+
+# Local config
+.env
+*.local.json
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
