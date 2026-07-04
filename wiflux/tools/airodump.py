@@ -12,6 +12,7 @@ from typing import Optional
 
 from ..config import WifluxConfig
 from ..models import AccessPoint, Client, EncryptionType, WPSState
+from .client_filter import is_valid_client
 from ..process import ManagedProcess
 from .wash import Wash
 
@@ -53,6 +54,8 @@ class Airodump:
         ]
         if self.channel:
             cmd.extend(["-c", str(self.channel)])
+            if self.channel > 14:
+                cmd.extend(["--band", "a"])
         elif self.cfg.scan.band_5ghz and self.cfg.scan.band_2ghz:
             cmd.extend(["--band", "abg"])
         elif self.cfg.scan.band_5ghz:
@@ -65,11 +68,17 @@ class Airodump:
         self._cleanup_files()
         self.proc = ManagedProcess(self._build_cmd())
 
-    def stop(self) -> None:
+    def stop(self, *, preserve: bool = False) -> None:
         if self.proc:
             self.proc.kill()
             self.proc = None
-        self._cleanup_files()
+        if not preserve:
+            self._cleanup_files()
+
+    def restart(self) -> None:
+        """Restart airodump without deleting captured pcap/csv files."""
+        self.stop(preserve=True)
+        self.proc = ManagedProcess(self._build_cmd())
 
     def _cleanup_files(self) -> None:
         for f in Path(self.temp_dir).glob(f"{self.prefix}*"):
@@ -152,6 +161,7 @@ class Airodump:
     def _parse_csv(self, path: Path) -> tuple[list[AccessPoint], dict[str, list[Client]]]:
         aps: list[AccessPoint] = []
         clients_map: dict[str, list[Client]] = {}
+        probing: list[tuple[Client, list[str]]] = []
         section = None
 
         with open(path, newline="", encoding="utf-8", errors="replace") as f:
@@ -171,7 +181,8 @@ class Airodump:
                     if ap:
                         aps.append(ap)
                 elif section == "client":
-                    self._parse_client_row(row, clients_map)
+                    self._parse_client_row(row, clients_map, probing)
+        self._attach_probing_clients(aps, clients_map, probing)
         return aps, clients_map
 
     def _parse_ap_row(self, fields: list[str]) -> Optional[AccessPoint]:
@@ -231,16 +242,75 @@ class Airodump:
         return EncryptionType.UNKNOWN
 
     @staticmethod
-    def _parse_client_row(fields: list[str], clients_map: dict[str, list[Client]]) -> None:
+    def _client_from_row(fields: list[str]) -> Client | None:
+        if len(fields) < 4:
+            return None
+        station = fields[0].strip().upper()
+        if not _BSSID_RE.match(station):
+            return None
+        power = int(fields[3].strip()) if fields[3].strip().lstrip("-").isdigit() else 0
+        packets = int(fields[4].strip()) if len(fields) > 4 and fields[4].strip().isdigit() else 0
+        return Client(station=station, power=power, packets=packets)
+
+    @staticmethod
+    def _parse_client_row(
+        fields: list[str],
+        clients_map: dict[str, list[Client]],
+        probing: list[tuple[Client, list[str]]],
+    ) -> None:
         if len(fields) < 6:
             return
-        station = fields[0].strip()
-        bssid = fields[5].strip() if len(fields) > 5 else ""
-        if not bssid or bssid == "(not associated)":
+        client = Airodump._client_from_row(fields)
+        if client is None:
             return
-        power = int(fields[3].strip()) if fields[3].strip().lstrip("-").isdigit() else 0
-        client = Client(station=station, power=power)
+        station = client.station
+        bssid = fields[5].strip().upper() if len(fields) > 5 else ""
+        probed = [
+            Airodump._sanitize_essid(part)
+            for part in fields[6:]
+            if part.strip()
+        ]
+        probed = [e for e in probed if e]
+
+        if not bssid or bssid == "(NOT ASSOCIATED)":
+            if probed and is_valid_client(station):
+                probing.append((client, probed))
+            return
+        if not is_valid_client(station, bssid):
+            return
         clients_map.setdefault(bssid, []).append(client)
+
+    @staticmethod
+    def _attach_probing_clients(
+        aps: list[AccessPoint],
+        clients_map: dict[str, list[Client]],
+        probing: list[tuple[Client, list[str]]],
+    ) -> None:
+        """Link (not associated) stations to APs when their probed ESSID matches."""
+        if not probing:
+            return
+        by_essid: dict[str, list[str]] = {}
+        for ap in aps:
+            if not ap.essid_known or not ap.essid:
+                continue
+            key = ap.essid.lower()
+            by_essid.setdefault(key, [])
+            if ap.bssid not in by_essid[key]:
+                by_essid[key].append(ap.bssid)
+
+        for client, essids in probing:
+            seen_bssids: set[str] = set()
+            for essid in essids:
+                for bssid in by_essid.get(essid.lower(), []):
+                    if bssid in seen_bssids:
+                        continue
+                    if not is_valid_client(client.station, bssid):
+                        continue
+                    existing = {c.station for c in clients_map.get(bssid, [])}
+                    if client.station in existing:
+                        continue
+                    clients_map.setdefault(bssid, []).append(client)
+                    seen_bssids.add(bssid)
 
     def __enter__(self) -> Airodump:
         self.start()

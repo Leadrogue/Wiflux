@@ -119,8 +119,6 @@ class PMKIDAttack(Attack):
             self.status("done", "Hash saved (crack skipped)", started=started)
             return AttackResult(True, message="PMKID captured (crack skipped)")
 
-        wl = os.path.basename(self.cfg.attack.wordlist)
-        self.tracker.log(f"Dictionary attack with {wl}", tag="pmkid")
         key = self.crack_hashcat(hash_line, started)
         if self.should_stop():
             return self.skipped_result()

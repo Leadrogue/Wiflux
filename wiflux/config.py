@@ -62,17 +62,22 @@ class AttackConfig:
     wep_timeout: int = 600
     wep_crack_ivs: int = 10000
     no_deauth: bool = False
-    num_deauths: int = 3
+    num_deauths: int = 8
     wpa_timeout: int = 300
     pmkid_timeout: int = 120
     wps_timeout: int = 300
-    deauth_burst: int = 10   # seconds of continuous deauth during handshake capture
-    deauth_listen: int = 20  # seconds to listen quietly between deauth bursts
+    deauth_burst: int = 5    # legacy; kept for CLI compat
+    deauth_listen: int = 8   # RX window (seconds) after each per-target deauth
     skip_crack: bool = False
     wordlist: Optional[str] = None
     use_bully: bool = False
     attack_max: int = 0
     parallel_pmkid: bool = False  # deprecated: same interface can't run hcxdump+airodump
+    capture_health: Optional[bool] = None  # None = prompt in interactive mode
+    smart_wordlist: Optional[bool] = None  # None = prompt before crack
+    yes_capture_health: bool = False
+    yes_smart_wordlist: bool = False
+    smart_wordlist_size: int = 0  # 0 = prompt; otherwise fixed count (max 100000)
 
 
 @dataclass

@@ -22,6 +22,9 @@
 ## Features
 
 - **Live Rich UI** — Real-time scan table with signal, encryption, WPS status, clients, and priority scoring
+- **ESSID-smart wordlist** — Targeted password candidates from network name + vendor before rockyou (preview, configurable size up to 100k)
+- **Live capture health** — EAPOL / deauth / reconnect counters during handshake capture
+- **Probing client detection** — Scan CL column includes stations probing an ESSID, not only associated clients
 - **Matrix welcome screen** — Optional splash with dependency check on startup
 - **Smart attack order** — WEP → WPS Pixie → WPS PIN → PMKID → Handshake, skipping irrelevant methods
 - **Multi-factor target ranking** — SCORE combines signal, clients, encryption, and WPS state
@@ -52,15 +55,15 @@ Download the latest release from **[GitHub Releases](https://github.com/Leadrogu
 
 ```bash
 # Download and install the Linux installer bundle
-tar -xzf wiflux-1.0.0-linux-installer.tar.gz
-cd wiflux-1.0.0-linux-installer
+tar -xzf wiflux-1.0.1-linux-installer.tar.gz
+cd wiflux-1.0.1-linux-installer
 ./install.sh
 ```
 
 Or install directly with pip:
 
 ```bash
-pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.0/wiflux-1.0.0-py3-none-any.whl --break-system-packages
+pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.1/wiflux-1.0.1-py3-none-any.whl --break-system-packages
 ```
 
 ### Install from source

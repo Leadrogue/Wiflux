@@ -46,6 +46,7 @@ class ProgressTracker:
         self.decloaking: bool = False
         self.scan_status: str = "Searching"
         self.targets: list[AccessPoint] = []
+        self.discovered_targets: list[AccessPoint] = []
         self.target_index: int = 0
         self.target_total: int = 0
         self.current_target: Optional[AccessPoint] = None
@@ -58,6 +59,7 @@ class ProgressTracker:
         self._skip_event = threading.Event()
         self._skip_listener: Optional[Any] = None
         self._show_skip_hint: bool = False
+        self._live_suspended: bool = False
 
     def log(self, msg: str, *, tag: str | None = None) -> None:
         ts = time.strftime("%H:%M:%S")
@@ -86,6 +88,10 @@ class ProgressTracker:
         with self._lock:
             if self.mode == "scan":
                 self.scan_elapsed = time.time() - self._started_at
+
+    def set_discovered_targets(self, targets: list[AccessPoint]) -> None:
+        with self._lock:
+            self.discovered_targets = list(targets)
 
     def update_scan(self, targets: list[AccessPoint], *, decloaking: bool = False) -> None:
         with self._lock:
@@ -121,6 +127,8 @@ class ProgressTracker:
     def disable_skip_controls(self) -> None:
         if self._skip_listener:
             self._skip_listener.stop()
+            if self._skip_listener._thread:
+                self._skip_listener._thread.join(timeout=2.0)
         self._show_skip_hint = False
         self.clear_skip()
 
@@ -250,6 +258,21 @@ class ProgressTracker:
                     stats_parts.append(f"clients:{line.stats['clients']}")
                 if "deauths" in line.stats:
                     stats_parts.append(f"deauths:{line.stats['deauths']}")
+                if "eapol" in line.stats:
+                    stats_parts.append(f"EAPOL:{line.stats['eapol']}")
+                if "deauth_rx" in line.stats:
+                    stats_parts.append(f"deauth:{line.stats['deauth_rx']}")
+                if "auth" in line.stats:
+                    stats_parts.append(f"auth:{line.stats['auth']}")
+                if "assoc" in line.stats:
+                    stats_parts.append(f"assoc:{line.stats['assoc']}")
+                if "reconnect" in line.stats:
+                    flag = "yes" if line.stats["reconnect"] else "no"
+                    stats_parts.append(f"reconnect:{flag}")
+                if line.stats.get("wordlist", "").startswith("smart:"):
+                    stats_parts.append(f"smart:{line.stats['wordlist'].split(':', 1)[1]}")
+                elif line.stats.get("wordlist"):
+                    stats_parts.append(f"dict:{line.stats['wordlist']}")
                 if "cap_kb" in line.stats:
                     stats_parts.append(f"cap:{line.stats['cap_kb']}KB")
                 if "pcap_kb" in line.stats:
@@ -337,6 +360,14 @@ class ProgressTracker:
                     stats.append(f"clients={line.stats['clients']}")
                 if "deauths" in line.stats:
                     stats.append(f"deauths={line.stats['deauths']}")
+                if "eapol" in line.stats:
+                    stats.append(f"EAPOL={line.stats['eapol']}")
+                if "deauth_rx" in line.stats:
+                    stats.append(f"deauth={line.stats['deauth_rx']}")
+                if "reconnect" in line.stats:
+                    stats.append(
+                        f"reconnect={'yes' if line.stats['reconnect'] else 'no'}"
+                    )
                 if line.stats.get("progress_pct") is not None:
                     stats.append(f"{line.stats['progress_pct']:.1f}%")
                 if line.stats.get("eta"):
@@ -365,7 +396,38 @@ class ProgressTracker:
             finally:
                 self._fallback = False
 
+    @contextmanager
+    def suspend_live(self):
+        """Pause the live attack UI for blocking prompts (tables, y/n)."""
+        had_skip = self._show_skip_hint
+        self._live_suspended = True
+        self.disable_skip_controls()
+        was_running = self._live is not None
+        if self._live:
+            try:
+                self._live.stop()
+            except Exception:
+                pass
+        try:
+            console.clear()
+        except Exception:
+            console.print("\n" * 3)
+        try:
+            yield
+        finally:
+            self._live_suspended = False
+            if was_running and self._live:
+                try:
+                    self._live.start()
+                    self.refresh()
+                except Exception:
+                    pass
+            if had_skip:
+                self.enable_skip_controls()
+
     def refresh(self) -> None:
+        if self._live_suspended:
+            return
         if self._live:
             self._live.update(self.render())
         elif self._fallback:

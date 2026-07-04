@@ -75,12 +75,24 @@ Examples:
     g.add_argument("--new-hs", action="store_true", help="Ignore existing handshakes in hs/")
     g.add_argument("--wept", type=int, default=600, help="WEP attack timeout (seconds)")
     g.add_argument("--no-deauth", action="store_true", help="Passive mode (no deauth)")
-    g.add_argument("--deauth-burst", type=int, default=10,
-                   help="Seconds of continuous deauth blitz during handshake capture (default: 10)")
-    g.add_argument("--deauth-listen", type=int, default=20,
-                   help="Seconds to listen between deauth blitzes (default: 20)")
+    g.add_argument("--deauth-burst", type=int, default=5,
+                   help="Legacy timing option (default: 5)")
+    g.add_argument("--deauth-listen", type=int, default=8,
+                   help="RX window in seconds after each per-target deauth (default: 8)")
     g.add_argument("--skip-crack", action="store_true", help="Capture only, don't crack")
     g.add_argument("--dict", dest="wordlist", help="Wordlist for cracking")
+    g.add_argument("--capture-health", action="store_true", help="Show live capture health during handshake")
+    g.add_argument("--no-capture-health", action="store_true", help="Disable live capture health panel")
+    g.add_argument("--yes-capture-health", action="store_true",
+                   help="Enable capture health without prompting")
+    g.add_argument("--smart-wordlist", action="store_true",
+                   help="Offer ESSID-smart wordlist with preview before full dictionary (default in interactive mode)")
+    g.add_argument("--no-smart-wordlist", action="store_true",
+                   help="Never offer ESSID-smart wordlist")
+    g.add_argument("--yes-smart-wordlist", action="store_true",
+                   help="Use smart wordlist immediately without preview or prompt")
+    g.add_argument("--smart-wordlist-size", type=int, default=0, metavar="N",
+                   help="Smart wordlist size (default 1000 when prompted, max 100000)")
     g.add_argument("--first", dest="attack_max", type=int, default=0, help="Attack first N targets")
     g.add_argument("--bully", action="store_true", help="Use bully for WPS")
     g.add_argument("--wpa-timeout", type=int, default=300)
@@ -114,8 +126,10 @@ def args_to_config(args: argparse.Namespace) -> WifluxConfig:
     else:
         cfg = WifluxConfig()
 
-    cfg.scan.interface = args.interface
-    cfg.scan.channels = args.channels
+    if args.interface is not None:
+        cfg.scan.interface = args.interface
+    if args.channels is not None:
+        cfg.scan.channels = args.channels
     cfg.scan.band_2ghz = args.__dict__.get("2ghz", True) or not args.__dict__.get("5ghz", False)
     cfg.scan.band_5ghz = args.__dict__.get("5ghz", False)
     if args.__dict__.get("5ghz"):
@@ -124,8 +138,10 @@ def args_to_config(args: argparse.Namespace) -> WifluxConfig:
     cfg.scan.scan_time = args.scan_time
     cfg.scan.min_power = args.min_power
     cfg.scan.clients_only = args.clients_only
-    cfg.scan.target_bssid = args.bssid
-    cfg.scan.target_essid = args.essid
+    if args.bssid is not None:
+        cfg.scan.target_bssid = args.bssid
+    if args.essid is not None:
+        cfg.scan.target_essid = args.essid
     cfg.scan.ignore_essids = args.ignore_essid or []
     cfg.scan.decloak = not args.nodecloak
     cfg.scan.ignore_cracked = args.ignore_cracked
@@ -157,6 +173,19 @@ def args_to_config(args: argparse.Namespace) -> WifluxConfig:
     cfg.attack.deauth_listen = args.deauth_listen
     cfg.attack.skip_crack = args.skip_crack
     cfg.attack.wordlist = find_wordlist(args.wordlist)
+    if args.capture_health:
+        cfg.attack.capture_health = True
+    elif args.no_capture_health:
+        cfg.attack.capture_health = False
+    cfg.attack.yes_capture_health = args.yes_capture_health
+    if args.smart_wordlist:
+        cfg.attack.smart_wordlist = True
+    elif args.no_smart_wordlist:
+        cfg.attack.smart_wordlist = False
+    cfg.attack.yes_smart_wordlist = args.yes_smart_wordlist
+    if args.smart_wordlist_size > 0:
+        from .tools.smart_wordlist import clamp_wordlist_size
+        cfg.attack.smart_wordlist_size = clamp_wordlist_size(args.smart_wordlist_size)
     cfg.attack.attack_max = args.attack_max
     cfg.attack.use_bully = args.bully
     cfg.attack.wpa_timeout = args.wpa_timeout

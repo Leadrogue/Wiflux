@@ -139,20 +139,8 @@ class HcxTools:
 
     @staticmethod
     def cap_to_hash(capfile: str, bssid: str, essid: str | None) -> str | None:
-        if not which("hcxpcapngtool"):
-            return None
-        out = capfile + ".22000"
-        if os.path.exists(out):
-            os.remove(out)
-        run(["hcxpcapngtool", "-o", out, capfile], timeout=60)
-        if not os.path.exists(out):
-            return None
-        bssid_target = bssid.replace(":", "").lower()
-        with open(out) as f:
-            for line in f:
-                if bssid_target in line.replace(":", "").lower():
-                    return line.strip()
-        return None
+        from .handshake_detect import extract_hash
+        return extract_hash(capfile, bssid)
 
 
 @dataclass
@@ -368,35 +356,8 @@ class Hashcat:
     @staticmethod
     def check_handshake(capfile: str, bssid: str, essid: str | None = None) -> bool:
         """Fast, non-fatal handshake check — must never raise or block capture for long."""
-        if not os.path.exists(capfile) or os.path.getsize(capfile) < 64:
-            return False
-
-        bssid_target = bssid.replace(":", "").lower()
-
-        if which("hcxpcapngtool"):
-            tmp_hash = f"{capfile}.wiflux_hs_check.22000"
-            try:
-                if os.path.exists(tmp_hash):
-                    os.remove(tmp_hash)
-                run(["hcxpcapngtool", "-o", tmp_hash, capfile], timeout=8)
-                if os.path.exists(tmp_hash) and os.path.getsize(tmp_hash) > 0:
-                    with open(tmp_hash) as f:
-                        for line in f:
-                            parts = line.strip().split("*")
-                            if len(parts) >= 4 and parts[3].lower().replace(":", "") == bssid_target:
-                                return True
-            except (subprocess.TimeoutExpired, OSError):
-                pass
-            finally:
-                if os.path.exists(tmp_hash):
-                    os.remove(tmp_hash)
-
-        try:
-            stdout, _, _ = run(["aircrack-ng", "-b", bssid, capfile], timeout=5)
-            low = stdout.lower()
-            return "1 handshake" in low or "wpa (1 handshake)" in low
-        except (subprocess.TimeoutExpired, OSError):
-            return False
+        from .handshake_detect import check_handshake as detect_handshake
+        return detect_handshake(capfile, bssid, essid)
 
 
 class _HashcatProcess:

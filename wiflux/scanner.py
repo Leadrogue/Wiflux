@@ -21,6 +21,7 @@ class Scanner:
         self.store = store
         self.tracker = tracker or get_tracker()
         self.targets: list[AccessPoint] = []
+        self.discovered: list[AccessPoint] = []
         self._decloak = DecloakManager(cfg)
 
     def scan(self) -> list[AccessPoint]:
@@ -109,8 +110,10 @@ class Scanner:
                             f"[dim]({safe_markup(ap.bssid)})[/]",
                             tag="decloak",
                         )
+            self.discovered = raw
             self.targets = self._filter(raw)
             self.tracker.update_scan(self.targets, decloaking=self._decloak.active)
+            self.tracker.set_discovered_targets(self.discovered)
             self.tracker.refresh()
 
             if scan_limit and time.time() - start >= scan_limit:
@@ -139,7 +142,10 @@ class Scanner:
                 continue
             if self.cfg.scan.target_bssid and ap.bssid.lower() != self.cfg.scan.target_bssid.lower():
                 continue
-            if self.cfg.scan.target_essid and (not ap.essid_known or ap.essid != self.cfg.scan.target_essid):
+            if self.cfg.scan.target_essid and (
+                not ap.essid_known
+                or (ap.essid or "").lower() != self.cfg.scan.target_essid.lower()
+            ):
                 continue
             if any(ign.lower() in (ap.essid or "").lower() for ign in self.cfg.scan.ignore_essids):
                 continue
