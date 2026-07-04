@@ -2,13 +2,7 @@
 # Install Wiflux from a GitHub release bundle.
 set -euo pipefail
 
-VERSION="${WIFLUX_VERSION:-1.0.0}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WHEEL=$(find "$SCRIPT_DIR" -maxdepth 1 -name "wiflux-${VERSION}-*.whl" | head -1)
-
-echo "Wiflux ${VERSION} installer"
-echo "==========================="
-echo
 
 if ! command -v python3 >/dev/null 2>&1; then
     echo "Error: python3 is required (3.10+)."
@@ -23,14 +17,29 @@ if [ "$PY_MAJOR" -lt 3 ] || { [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -lt 10 ]; }
     exit 1
 fi
 
+WHEEL="${WIFLUX_WHEEL:-}"
 if [ -z "$WHEEL" ] || [ ! -f "$WHEEL" ]; then
-    WHEEL=$(find "$SCRIPT_DIR" -maxdepth 1 -name "wiflux-*.whl" | head -1)
+    if [ -n "${WIFLUX_VERSION:-}" ]; then
+        WHEEL=$(find "$SCRIPT_DIR" -maxdepth 1 -name "wiflux-${WIFLUX_VERSION}-*.whl" | head -1)
+    fi
+fi
+if [ -z "$WHEEL" ] || [ ! -f "$WHEEL" ]; then
+    WHEEL=$(find "$SCRIPT_DIR" -maxdepth 1 -name "wiflux-*.whl" | sort -V | tail -1)
 fi
 
 if [ -z "$WHEEL" ] || [ ! -f "$WHEEL" ]; then
     echo "Error: wheel file not found in ${SCRIPT_DIR}"
     exit 1
 fi
+
+VERSION=$(basename "$WHEEL" | sed -n 's/^wiflux-\([0-9][0-9.]*\)-.*/\1/p')
+if [ -z "$VERSION" ]; then
+    VERSION="unknown"
+fi
+
+echo "Wiflux ${VERSION} installer"
+echo "==========================="
+echo
 
 PIP_BREAK=""
 if python3 -m pip install --help 2>/dev/null | grep -q break-system-packages; then
@@ -41,15 +50,17 @@ echo "Installing from: $(basename "$WHEEL")"
 python3 -m pip install --upgrade pip $PIP_BREAK >/dev/null 2>&1 || true
 python3 -m pip install "$WHEEL" $PIP_BREAK
 
+WIFLUX_BIN=$(command -v wiflux || true)
+if [ -z "$WIFLUX_BIN" ]; then
+    WIFLUX_BIN="/usr/local/bin/wiflux"
+fi
+
 echo
 echo "Installation complete."
 echo
-if command -v wiflux >/dev/null 2>&1; then
-    echo "  wiflux --help"
-    echo "  sudo wiflux --kill --restore"
-else
-    echo "  python3 -m wiflux --help"
-    echo "  sudo python3 -m wiflux --kill --restore"
-fi
+echo "  wiflux --help"
+echo "  sudo env PATH=\"/usr/local/bin:\$PATH\" wiflux --kill --restore"
+echo "  # Kali/Debian: sudo often omits /usr/local/bin — use the line above, or:"
+echo "  sudo ${WIFLUX_BIN} --kill --restore"
 echo
 echo "See INSTALL.md and docs/TUTORIAL.md for setup and usage."

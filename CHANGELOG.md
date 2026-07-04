@@ -2,6 +2,24 @@
 
 All notable changes to **Wiflux** are documented here.
 
+## [1.0.2] — 2026-07-04
+
+### Fixes
+
+- **Installer banner** — `install.sh` now detects the bundled wheel version instead of printing a hardcoded `1.0.0`
+- **sudo PATH on Kali/Debian** — installer post-install hints and docs explain that `sudo wiflux` may fail because `/usr/local/bin` is not in sudo's `PATH`; use `sudo env PATH="/usr/local/bin:$PATH" wiflux` or `sudo /usr/local/bin/wiflux`
+
+### Install
+
+```bash
+curl -LO https://github.com/Leadrogue/Wiflux/releases/download/v1.0.2/wiflux-1.0.2-linux-installer.tar.gz
+tar -xzf wiflux-1.0.2-linux-installer.tar.gz
+cd wiflux-1.0.2-linux-installer
+./install.sh
+```
+
+---
+
 ## [1.0.1] — 2026-07-04
 
 ### Highlights
@@ -145,5 +163,6 @@ Initial public release.
 
 > For authorized security testing only.
 
+[1.0.2]: https://github.com/Leadrogue/Wiflux/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/Leadrogue/Wiflux/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/Leadrogue/Wiflux/releases/tag/v1.0.0

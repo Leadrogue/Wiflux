@@ -25,8 +25,10 @@ A hands-on guide to scanning, selecting targets, and running attacks with Wiflux
 After [installing Wiflux](../INSTALL.md), start an interactive session:
 
 ```bash
-sudo wiflux --kill --restore
+sudo env PATH="/usr/local/bin:$PATH" wiflux --kill --restore
 ```
+
+> **Kali/Debian:** `sudo` often excludes `/usr/local/bin` from `PATH`. If `sudo wiflux` fails with "command not found", use the command above or `sudo /usr/local/bin/wiflux`. See [INSTALL.md — Running with sudo](../INSTALL.md#running-with-sudo).
 
 | Flag | What it does |
 |------|--------------|

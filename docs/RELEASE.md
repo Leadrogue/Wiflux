@@ -11,19 +11,19 @@ Pre-built downloads are published at:
 Download `wiflux-VERSION-linux-installer.tar.gz`, then:
 
 ```bash
-tar -xzf wiflux-1.0.0-linux-installer.tar.gz
-cd wiflux-1.0.0-linux-installer
+tar -xzf wiflux-1.0.2-linux-installer.tar.gz
+cd wiflux-1.0.2-linux-installer
 ./install.sh
 ```
 
-The installer script checks Python 3.10+, installs the bundled wheel, and prints next steps.
+The installer script checks Python 3.10+, installs the bundled wheel, detects the version from the wheel filename, and prints next steps.
 
 ---
 
 ## Install from wheel (pip)
 
 ```bash
-pip install wiflux-1.0.0-py3-none-any.whl --break-system-packages
+pip install wiflux-1.0.2-py3-none-any.whl --break-system-packages
 ```
 
 On Kali/Debian with system Python, `--break-system-packages` is required.
@@ -31,7 +31,7 @@ On Kali/Debian with system Python, `--break-system-packages` is required.
 Direct from GitHub:
 
 ```bash
-pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.0/wiflux-1.0.0-py3-none-any.whl --break-system-packages
+pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.2/wiflux-1.0.2-py3-none-any.whl --break-system-packages
 ```
 
 ---
@@ -39,8 +39,8 @@ pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.0/wiflux-
 ## Install from source tarball
 
 ```bash
-tar -xzf wiflux-1.0.0.tar.gz
-cd wiflux-1.0.0
+tar -xzf wiflux-1.0.2.tar.gz
+cd wiflux-1.0.2
 pip install . --break-system-packages
 ```
 
@@ -51,7 +51,7 @@ pip install . --break-system-packages
 Each release includes `wiflux-VERSION-checksums.sha256`:
 
 ```bash
-sha256sum -c wiflux-1.0.0-checksums.sha256
+sha256sum -c wiflux-1.0.2-checksums.sha256
 ```
 
 ---
@@ -60,7 +60,9 @@ sha256sum -c wiflux-1.0.0-checksums.sha256
 
 ```bash
 wiflux --help
-sudo wiflux --kill --restore
+sudo env PATH="/usr/local/bin:$PATH" wiflux --kill --restore
 ```
+
+On Kali/Debian, `sudo` may omit `/usr/local/bin` from `PATH`. Use the `env PATH=...` form above, or `sudo /usr/local/bin/wiflux --kill --restore`.
 
 See [INSTALL.md](../INSTALL.md) for wireless adapter setup and dependencies.

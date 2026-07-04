@@ -62,27 +62,27 @@ Download the latest release from **[GitHub Releases](https://github.com/Leadrogu
 Includes the wheel, install script, and quick-start docs:
 
 ```bash
-tar -xzf wiflux-1.0.0-linux-installer.tar.gz
-cd wiflux-1.0.0-linux-installer
+tar -xzf wiflux-1.0.2-linux-installer.tar.gz
+cd wiflux-1.0.2-linux-installer
 ./install.sh
 ```
 
 ### Option B — pip from wheel
 
 ```bash
-pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.0/wiflux-1.0.0-py3-none-any.whl --break-system-packages
+pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.2/wiflux-1.0.2-py3-none-any.whl --break-system-packages
 ```
 
 ### Option C — pip from source tarball
 
 ```bash
-pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.0/wiflux-1.0.0.tar.gz --break-system-packages
+pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.2/wiflux-1.0.2.tar.gz --break-system-packages
 ```
 
 ### Verify checksums
 
 ```bash
-sha256sum -c wiflux-1.0.0-checksums.sha256
+sha256sum -c wiflux-1.0.2-checksums.sha256
 ```
 
 See [docs/RELEASE.md](docs/RELEASE.md) for full release details.
@@ -120,6 +120,21 @@ pip install -e .
 wiflux --help
 wiflux --check
 ```
+
+---
+
+## Running with sudo
+
+On Kali Linux and other Debian-based systems, `sudo` often uses a restricted `PATH` that **excludes** `/usr/local/bin` (where `pip` installs the `wiflux` command). A plain `sudo wiflux` may report `command not found` even after a successful install.
+
+Use one of these forms:
+
+```bash
+sudo env PATH="/usr/local/bin:$PATH" wiflux --kill --restore
+sudo /usr/local/bin/wiflux --kill --restore
+```
+
+The installer prints these hints after installation. Non-privileged commands such as `wiflux --help` work without `sudo`.
 
 ---
 
@@ -229,12 +244,16 @@ Install the aircrack-ng suite: `sudo apt install aircrack-ng`
 
 Ensure `wash` is installed (`sudo apt install reaver`). Wiflux probes WPS in the background during scanning.
 
+### `sudo: wiflux: command not found`
+
+The binary is installed to `/usr/local/bin/wiflux`, but sudo may not search that directory. See [Running with sudo](#running-with-sudo).
+
 ### Permission denied
 
 Wiflux must run as root for monitor mode and packet injection:
 
 ```bash
-sudo wiflux
+sudo env PATH="/usr/local/bin:$PATH" wiflux
 ```
 
 ### Rich live display issues over SSH

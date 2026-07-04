@@ -55,15 +55,15 @@ Download the latest release from **[GitHub Releases](https://github.com/Leadrogu
 
 ```bash
 # Download and install the Linux installer bundle
-tar -xzf wiflux-1.0.1-linux-installer.tar.gz
-cd wiflux-1.0.1-linux-installer
+tar -xzf wiflux-1.0.2-linux-installer.tar.gz
+cd wiflux-1.0.2-linux-installer
 ./install.sh
 ```
 
 Or install directly with pip:
 
 ```bash
-pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.1/wiflux-1.0.1-py3-none-any.whl --break-system-packages
+pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.2/wiflux-1.0.2-py3-none-any.whl --break-system-packages
 ```
 
 ### Install from source
@@ -76,9 +76,12 @@ pip install -e . --break-system-packages
 
 ### Run
 
+On Kali/Debian, `sudo` may not include `/usr/local/bin` in `PATH`. Use one of:
+
 ```bash
-sudo wiflux --kill --restore      # Interactive audit
-sudo wiflux --auto -p 30          # Auto-attack after 30s scan
+sudo env PATH="/usr/local/bin:$PATH" wiflux --kill --restore   # Interactive audit
+sudo env PATH="/usr/local/bin:$PATH" wiflux --auto -p 30       # Auto-attack after 30s scan
+# or: sudo /usr/local/bin/wiflux --kill --restore
 ```
 
 See the full [Installation Guide](INSTALL.md), [Release downloads](docs/RELEASE.md), and [Tutorial](docs/TUTORIAL.md).
