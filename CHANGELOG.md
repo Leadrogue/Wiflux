@@ -12,7 +12,7 @@ _(nothing yet)_
 
 Fixed a minor annoyance where the crack ladder would not let you skip an individual hashcat pass — you can now press **Space** during cracking to jump to the next pass. Dictionary and rule stages are ordered **fastest to longest**: ESSID-smart and vendor defaults first, full rockyou third, then hashcat rule passes from smallest to largest keyspace, with `d3ad0ne.rule` always last.
 
-The tool generates several wordlists automatically (ESSID-smart, vendor defaults, full dictionary, and embedded hashcat rules) to improve crack coverage. The final rule pass can run all night on a large dictionary — that is where your recon and the priority **score** shown in the scan table matter most.
+The tool generates several wordlists automatically (ESSID-smart, vendor defaults, full dictionary, and embedded hashcat rules) to improve crack coverage. The final rule pass can run all night on a large dictionary — that is where your recon and the priority **score** shown in the scan table matter most when selecting a viable target!
 
 ### Changed
 
