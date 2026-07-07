@@ -17,7 +17,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/Leadrogue/Wiflux?label=download)](https://github.com/Leadrogue/Wiflux/releases/latest)
 
-![Wiflux welcome screen](assets/screenshots/welcome-v1.0.3.png)
+![Wiflux welcome screen](assets/screenshots/welcome-v1.0.4.png)
 
 ---
 
@@ -26,7 +26,7 @@
 - **Live Rich UI** — Real-time scan table with signal, encryption, WPS status, clients, and priority scoring
 - **Matrix welcome screen** — Optional splash with dependency check (`--no-splash` to skip)
 - **ESSID-smart wordlist** — Targeted candidates from network name + vendor before rockyou (preview, up to 100k)
-- **Crack ladder** — Vendor default passwords and hashcat rules before full dictionary (`--no-crack-ladder`)
+- **Crack ladder** — ESSID-smart → vendor defaults → full dictionary → hashcat rules (fastest-to-longest); Space skips a pass (`--no-crack-ladder`)
 - **Adaptive deauth** — Handshake capture tunes burst/listen timing from live capture health (`--no-adaptive-deauth`)
 - **Multi-backend deauth** — mdk4, aireplay-ng, bettercap, mdk3 (`--deauth-tools`, `--deauth-combo`)
 - **PMKID enhancements** — Passive-first capture, dual-band rotation, success screen before cracking
@@ -37,7 +37,7 @@
 - **Handshake validation** — Full capture check with on-screen confirm before hashcat
 - **Hidden SSID decloak** — Deauth probe to reveal cloaked ESSIDs during scan
 - **SQLite results store** — Track cracked networks; skip by default (`--no-ignore-cracked` to re-attack)
-- **89 automated tests** — No live radio required for CI
+- **92 automated tests** — No live radio required for CI
 
 ### Supported attacks
 
@@ -55,19 +55,19 @@
 
 ### Install from release (recommended)
 
-Download **[v1.0.3](https://github.com/Leadrogue/Wiflux/releases/tag/v1.0.3)**:
+Download **[v1.0.4](https://github.com/Leadrogue/Wiflux/releases/tag/v1.0.4)**:
 
 ```bash
-curl -LO https://github.com/Leadrogue/Wiflux/releases/download/v1.0.3/wiflux-1.0.3-linux-installer.tar.gz
-tar -xzf wiflux-1.0.3-linux-installer.tar.gz
-cd wiflux-1.0.3-linux-installer
+curl -LO https://github.com/Leadrogue/Wiflux/releases/download/v1.0.4/wiflux-1.0.4-linux-installer.tar.gz
+tar -xzf wiflux-1.0.4-linux-installer.tar.gz
+cd wiflux-1.0.4-linux-installer
 ./install.sh
 ```
 
 Or install directly with pip:
 
 ```bash
-pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.3/wiflux-1.0.3-py3-none-any.whl --break-system-packages
+pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.4/wiflux-1.0.4-py3-none-any.whl --break-system-packages
 ```
 
 ### Install from source
@@ -132,7 +132,7 @@ wiflux --check capture.cap
 wiflux --export results.json
 ```
 
-### Key options (v1.0.3)
+### Key options (v1.0.4)
 
 | Flag | Description |
 |------|-------------|

@@ -203,7 +203,45 @@ class _WordlistReader:
         self._fh.close()
 
 
+PASS_TIMEOUT = 3600
+_benchmark_cache: dict[str, int] = {}
+
+
 class Hashcat:
+    @staticmethod
+    def benchmark_wpa_speed(wpa3: bool = False) -> int:
+        """Return cached WPA hash rate (H/s) from hashcat -b, or 0 if unavailable."""
+        mode = "22001" if wpa3 else "22000"
+        if mode in _benchmark_cache:
+            return _benchmark_cache[mode]
+        if not which("hashcat"):
+            return 0
+        stdout, _, code = run(
+            ["hashcat", "-b", "-m", mode, "--force"],
+            timeout=120,
+        )
+        if code != 0:
+            return 0
+        speed = 0
+        for line in stdout.splitlines():
+            match = re.search(
+                r"Speed\.#\d+\.+:\s+([\d.]+)\s+([kMG]?H/s)",
+                line,
+            )
+            if not match:
+                continue
+            val = float(match.group(1))
+            unit = match.group(2)
+            if unit.startswith("M"):
+                speed = int(val * 1_000_000)
+            elif unit.startswith("k"):
+                speed = int(val * 1_000)
+            else:
+                speed = int(val)
+            break
+        _benchmark_cache[mode] = speed
+        return speed
+
     @staticmethod
     def crack_hash(
         hash_line: str,
@@ -270,8 +308,14 @@ class Hashcat:
                     candidate = ""
                     now = time.time()
                     if now - last_candidate_at >= 1.0:
-                        pos = int(data.get("restore_point") or current or 0)
-                        candidate = reader.get_line(pos)[:40]
+                        # With -r rules, restore_point is a global candidate index
+                        # (wordlist × rules), not a wordlist line — do not seek.
+                        if rules:
+                            candidate = os.path.basename(rules)
+                        else:
+                            pos = int(data.get("restore_point") or current or 0)
+                            if pos < 500_000:
+                                candidate = reader.get_line(pos)[:40]
                         last_candidate_at = now
 
                     on_progress(CrackProgress(
@@ -303,7 +347,7 @@ class Hashcat:
                         except json.JSONDecodeError:
                             continue
 
-            proc.wait(timeout=3600)
+            proc.wait(timeout=PASS_TIMEOUT)
             return Hashcat._read_cracked_key(mode, hash_file)
         except subprocess.TimeoutExpired:
             if proc:

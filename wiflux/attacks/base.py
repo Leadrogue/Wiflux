@@ -107,46 +107,32 @@ class Attack(ABC):
         return path, path, f"smart:{count}"
 
     def crack_hashcat(self, hash_line: str, started: float) -> str | None:
-        from ..tools.crack_ladder import discover_hashcat_rules, write_vendor_wordlist
+        from ..tools.crack_ladder import (
+            build_crack_stages,
+            enrich_stage_etas,
+            format_crack_plan,
+        )
         from ..tools.hashcat import CrackProgress, Hashcat
 
         wordlist, temp_path, wl_label = self._resolve_crack_wordlist()
         if not wordlist:
             return None
 
-        cleanup: list[str] = []
-        if temp_path:
-            cleanup.append(temp_path)
-
-        stages: list[tuple[str, str, str | None]] = []
-        if wl_label.startswith("smart:"):
-            count = wl_label.split(":", 1)[1]
-            stages.append((wordlist, f"ESSID-smart ({count})", None))
-        else:
-            stages.append((wordlist, f"Dictionary ({wl_label})", None))
-
-        if self.cfg.attack.crack_ladder:
-            vendor = write_vendor_wordlist(self.ap, self.cfg)
-            if vendor:
-                vpath, vcount = vendor
-                cleanup.append(vpath)
-                stages.append((vpath, f"Vendor defaults ({vcount})", None))
-            base_wl = self.cfg.attack.wordlist
-            if base_wl and os.path.isfile(base_wl):
-                for rule in discover_hashcat_rules()[:2]:
-                    stages.append((
-                        base_wl,
-                        f"Rules ({os.path.basename(rule)})",
-                        rule,
-                    ))
-                wl_name = os.path.basename(base_wl)
-                if not any(s[0] == base_wl and s[2] is None for s in stages):
-                    stages.append((base_wl, f"Full dictionary ({wl_name})", None))
+        stages, cleanup = build_crack_stages(
+            self.ap, self.cfg, wordlist, wl_label, temp_path,
+        )
+        speed = Hashcat.benchmark_wpa_speed(self.ap.crack_use_wpa3)
+        enrich_stage_etas(stages, speed)
+        for line in format_crack_plan(stages, speed=speed):
+            self.tracker.log(line, tag="hashcat")
+        self.tracker.refresh()
 
         try:
-            for idx, (wl_path, detail, rules) in enumerate(stages, start=1):
+            for idx, stage in enumerate(stages, start=1):
+                wl_path, detail, rules = stage.wordlist, stage.label, stage.rules
                 if self.should_stop():
                     return None
+                self.tracker.clear_skip_pass()
                 label = f"pass {idx}/{len(stages)}: {detail}"
                 self.tracker.log(f"[cyan]hashcat[/] {label}", tag=self.name)
                 self.status("crack", label, started=started, wordlist=detail)
@@ -172,10 +158,18 @@ class Attack(ABC):
                     self.ap.crack_use_wpa3,
                     rules=rules,
                     on_progress=on_progress,
-                    should_stop=self.should_stop,
+                    should_stop=self.tracker.skip_pass_requested,
                 )
                 if key:
                     return key
+                if self.tracker.skip_pass_requested():
+                    self.tracker.clear_skip_pass()
+                    if idx < len(stages):
+                        self.tracker.log(
+                            f"[yellow]{detail}[/] skipped — next crack stage",
+                            tag=self.name,
+                        )
+                    continue
                 if idx < len(stages):
                     self.tracker.log(
                         f"[yellow]{detail}[/] exhausted — next crack stage",

@@ -6,6 +6,35 @@ All notable changes to **Wiflux** are documented here.
 
 _(nothing yet)_
 
+## [1.0.4] — 2026-07-07
+
+### Highlights
+
+Fixed a minor annoyance where the crack ladder would not let you skip an individual hashcat pass — you can now press **Space** during cracking to jump to the next pass. Dictionary and rule stages are ordered **fastest to longest**: ESSID-smart and vendor defaults first, full rockyou third, then hashcat rule passes from smallest to largest keyspace, with `d3ad0ne.rule` always last.
+
+The tool generates several wordlists automatically (ESSID-smart, vendor defaults, full dictionary, and embedded hashcat rules) to improve crack coverage. The final rule pass can run all night on a large dictionary — that is where your recon and the priority **score** shown in the scan table matter most.
+
+### Changed
+
+- **Crack ladder order** — Full dictionary before rule passes; rule stages sorted shortest-to-longest ETA; `d3ad0ne.rule` remains last
+- **Per-pass skip** — **Space** during the crack phase skips the current hashcat pass and continues the ladder (capture/other phases still skip the whole attack)
+- **Crack plan** — Activity log lists all passes with candidate counts and estimated ETAs before hashcat starts
+
+### Fixes
+
+- **Rule progress display** — Hashcat `restore_point` no longer misread as a wordlist line index during rule passes (fixes apparent hang on large rulesets like `d3ad0ne`)
+
+### Install
+
+```bash
+curl -LO https://github.com/Leadrogue/Wiflux/releases/download/v1.0.4/wiflux-1.0.4-linux-installer.tar.gz
+tar -xzf wiflux-1.0.4-linux-installer.tar.gz
+cd wiflux-1.0.4-linux-installer
+./install.sh
+```
+
+---
+
 ## [1.0.3] — 2026-07-07
 
 ### Highlights
@@ -208,6 +237,7 @@ Initial public release.
 
 > For authorized security testing only.
 
+[1.0.4]: https://github.com/Leadrogue/Wiflux/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/Leadrogue/Wiflux/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/Leadrogue/Wiflux/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/Leadrogue/Wiflux/compare/v1.0.0...v1.0.1

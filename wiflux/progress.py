@@ -58,6 +58,7 @@ class ProgressTracker:
         self._last_fallback_print: float = 0.0
         self._started_at: float = 0.0
         self._skip_event = threading.Event()
+        self._skip_pass_event = threading.Event()
         self._skip_listener: Optional[Any] = None
         self._show_skip_hint: bool = False
         self._live_suspended: bool = False
@@ -138,21 +139,37 @@ class ProgressTracker:
         self._show_skip_hint = False
         self.clear_skip()
 
+    def _in_crack_phase(self) -> bool:
+        return any(line.phase == "crack" for line in self.attacks.values())
+
     def request_skip(self) -> None:
         with self._lock:
             if self.mode != "attack":
                 return
-            if self._skip_event.is_set():
-                return
-            self._skip_event.set()
-            self.log("[yellow]Space — skipping to next attack[/]", tag="input")
+            if self._in_crack_phase():
+                if self._skip_pass_event.is_set():
+                    return
+                self._skip_pass_event.set()
+                self.log("[yellow]Space — skipping to next crack pass[/]", tag="input")
+            else:
+                if self._skip_event.is_set():
+                    return
+                self._skip_event.set()
+                self.log("[yellow]Space — skipping to next attack[/]", tag="input")
         self.refresh()
 
     def clear_skip(self) -> None:
         self._skip_event.clear()
+        self._skip_pass_event.clear()
+
+    def clear_skip_pass(self) -> None:
+        self._skip_pass_event.clear()
 
     def skip_requested(self) -> bool:
         return self._skip_event.is_set()
+
+    def skip_pass_requested(self) -> bool:
+        return self._skip_pass_event.is_set()
 
     def update_attack(
         self,
@@ -242,7 +259,10 @@ class ProgressTracker:
             if self._show_skip_hint:
                 header.append("  |  ", style="dim")
                 header.append("Space", style="bold yellow")
-                header.append(" skip attack", style="dim")
+                if self._in_crack_phase():
+                    header.append(" skip pass", style="dim")
+                else:
+                    header.append(" skip attack", style="dim")
             parts.append(header)
 
         if self.attacks:
@@ -366,7 +386,14 @@ class ProgressTracker:
             )
         if self.mode == "attack" and self.current_target:
             ap = self.current_target
-            skip_hint = " | Space=skip" if self._show_skip_hint else ""
+            if self._show_skip_hint:
+                skip_hint = (
+                    " | Space=skip pass"
+                    if self._in_crack_phase()
+                    else " | Space=skip attack"
+                )
+            else:
+                skip_hint = ""
             parts = [
                 f"+ {'ATTACKING':<{MODE_LABEL_WIDTH}} [{self.target_index}/{self.target_total}] "
                 f"| {neutralize_mac_text(ap.display_name)} | {neutralize_mac_text(ap.bssid)} | ch{ap.channel}"

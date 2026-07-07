@@ -968,6 +968,60 @@ class TestCrackLadder(unittest.TestCase):
         rules = discover_hashcat_rules()
         self.assertIsInstance(rules, list)
 
+    def test_crack_ladder_full_dict_before_rules(self):
+        from wiflux.tools.crack_ladder import append_crack_ladder_stages
+
+        rockyou = "/usr/share/wordlists/rockyou.txt"
+        if not os.path.isfile(rockyou):
+            self.skipTest("rockyou not installed")
+        stages: list[tuple[str, str, str | None]] = []
+        append_crack_ladder_stages(stages, rockyou)
+        if not stages:
+            self.skipTest("no ladder stages")
+        labels = [s[1] for s in stages]
+        rule_labels = [s[1] for s in stages if s[2]]
+        if not rule_labels:
+            self.skipTest("no hashcat rules installed")
+        self.assertEqual(labels[0], "Full dictionary (rockyou.txt)")
+        full_idx = 0
+        for idx, stage in enumerate(stages):
+            if stage[2]:
+                self.assertGreater(idx, full_idx)
+        d3ad_idxs = [i for i, s in enumerate(stages) if s[2] and "d3ad0ne" in s[1].lower()]
+        if d3ad_idxs:
+            self.assertEqual(d3ad_idxs[0], len(stages) - 1)
+
+    def test_crack_ladder_rules_sorted_by_candidates(self):
+        from wiflux.tools.crack_ladder import (
+            append_crack_ladder_stages,
+            estimate_stage_candidates,
+        )
+
+        rockyou = "/usr/share/wordlists/rockyou.txt"
+        if not os.path.isfile(rockyou):
+            self.skipTest("rockyou not installed")
+        stages: list[tuple[str, str, str | None]] = []
+        append_crack_ladder_stages(stages, rockyou)
+        rule_stages = [s for s in stages if s[2] and "d3ad0ne" not in s[1].lower()]
+        if len(rule_stages) < 2:
+            self.skipTest("need multiple rule files for ordering test")
+        counts = [estimate_stage_candidates(s[0], s[2]) for s in rule_stages]
+        self.assertEqual(counts, sorted(counts))
+
+    def test_skip_pass_during_crack_phase(self):
+        tracker = ProgressTracker()
+        tracker.mode = "attack"
+        tracker.update_attack("handshake", "capture", "listening")
+        tracker.request_skip()
+        self.assertTrue(tracker.skip_requested())
+        self.assertFalse(tracker.skip_pass_requested())
+
+        tracker.clear_skip()
+        tracker.update_attack("handshake", "crack", "pass 1/3")
+        tracker.request_skip()
+        self.assertFalse(tracker.skip_requested())
+        self.assertTrue(tracker.skip_pass_requested())
+
 
 class TestHandshakeBandStalk(unittest.TestCase):
     def setUp(self):
