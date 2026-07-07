@@ -32,6 +32,7 @@ class ScanConfig:
     channels: Optional[str] = None
     band_2ghz: bool = True
     band_5ghz: bool = False
+    band_6ghz: bool = False
     scan_time: int = 0
     min_power: int = 0
     clients_only: bool = False
@@ -66,8 +67,14 @@ class AttackConfig:
     wpa_timeout: int = 300
     pmkid_timeout: int = 120
     wps_timeout: int = 300
-    deauth_burst: int = 5    # legacy; kept for CLI compat
-    deauth_listen: int = 8   # RX window (seconds) after each per-target deauth
+    deauth_burst: int = 5    # baseline deauth packets per burst (adaptive engine tunes from here)
+    deauth_listen: int = 8   # baseline RX window (seconds); adaptive engine scales per round
+    adaptive_deauth: bool = True  # tune deauth cadence from live capture-health feedback
+    deauth_tools: list[str] = field(
+        default_factory=lambda: ["mdk4", "aireplay", "bettercap", "mdk3"],
+    )
+    deauth_rotate: bool = True   # rotate backend each round when not combo mode
+    deauth_combo: bool = False   # run every available backend each round
     skip_crack: bool = False
     wordlist: Optional[str] = None
     use_bully: bool = False
@@ -78,6 +85,13 @@ class AttackConfig:
     yes_capture_health: bool = False
     yes_smart_wordlist: bool = False
     smart_wordlist_size: int = 0  # 0 = prompt; otherwise fixed count (max 100000)
+    transition_downgrade: bool = True  # WPA2/WPA3 mixed APs: prefer WPA2 capture + crack
+    algorithmic_wps: bool = True
+    offline_pixie: bool = True
+    pmkid_passive_ratio: float = 0.45
+    pmkid_band_rotate: bool = True
+    client_band_stalk: bool = True
+    crack_ladder: bool = True
 
 
 @dataclass
@@ -103,6 +117,8 @@ class WifluxConfig:
     def __post_init__(self):
         if self.attack.wordlist is None:
             self.attack.wordlist = find_wordlist()
+        self.output.data_dir = str(Path(self.output.data_dir).resolve())
+        self.output.handshake_dir = str(Path(self.output.handshake_dir).resolve())
         Path(self.output.data_dir).mkdir(parents=True, exist_ok=True)
         Path(self.output.handshake_dir).mkdir(parents=True, exist_ok=True)
 

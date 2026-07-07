@@ -13,7 +13,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from .models import AccessPoint, WPSState, rank_targets
+from .models import AccessPoint, HandshakeCaptureInfo, PMKIDCaptureInfo, WPSState, rank_targets
 
 # emoji=False: MAC addresses like 64:FD:96:CD:AF:EB contain :CD: which Rich renders as 💿
 console = (
@@ -47,10 +47,196 @@ def supports_live() -> bool:
     return sys.stdout.isatty()
 
 
+def show_handshake_validating(ap: AccessPoint, capfile: str) -> None:
+    """On-screen notice while a captured handshake is being checked."""
+    import os
+
+    cap_name = os.path.basename(capfile) if capfile else "—"
+    console.print(Panel(
+        "\n".join([
+            "[bold bright_yellow]◆  HANDSHAKE CAPTURED[/]",
+            "",
+            f"Network: [cyan]{safe_markup(ap.display_name)}[/]  "
+            f"[dim]|[/]  [dim]{safe_markup(ap.bssid)}[/]",
+            f"File: [dim]{safe_markup(cap_name)}[/]",
+            "",
+            "[bold white]Checking capture…[/]",
+            "[dim]Running hcxpcapngtool validation before cracking[/]",
+        ]),
+        border_style="bright_yellow",
+        padding=(1, 2),
+        title="[bold bright_yellow]Validating handshake[/]",
+        title_align="center",
+    ))
+
+
+def show_handshake_validated(ap: AccessPoint, message: str, *, bssid: str = "") -> None:
+    """Confirm a crackable handshake before the smart-wordlist step."""
+    lines = [
+        "[bold bright_green]✓  HANDSHAKE VALIDATED[/]",
+        "",
+        f"Network: [cyan]{safe_markup(ap.display_name)}[/]",
+        f"Target BSSID: [dim]{safe_markup(ap.bssid)}[/]",
+    ]
+    if bssid and bssid.upper() != ap.bssid.upper():
+        lines.append(f"Handshake BSSID: [yellow]{safe_markup(bssid)}[/]")
+    lines.extend([
+        "",
+        f"[green]{safe_markup(message)}[/]",
+        "",
+        "[dim]Proceeding to password recovery…[/]",
+    ])
+    console.print(Panel(
+        "\n".join(lines),
+        border_style="bright_green",
+        padding=(1, 2),
+        title="[bold bright_green]Ready to crack[/]",
+        title_align="center",
+    ))
+
+
+def show_handshake_rejected(ap: AccessPoint, reason: str) -> None:
+    """Handshake candidate failed full validation."""
+    console.print(Panel(
+        "\n".join([
+            "[bold bright_red]✗  HANDSHAKE NOT VALID[/]",
+            "",
+            f"Network: [cyan]{safe_markup(ap.display_name)}[/]  "
+            f"[dim]|[/]  [dim]{safe_markup(ap.bssid)}[/]",
+            "",
+            f"[yellow]{safe_markup(reason)}[/]",
+            "",
+            "[dim]Capture will not be cracked — continue listening or retry.[/]",
+        ]),
+        border_style="bright_red",
+        padding=(1, 2),
+        title="[bold bright_red]Validation failed[/]",
+        title_align="center",
+    ))
+
+
+def show_pmkid_captured(ap: AccessPoint, info: PMKIDCaptureInfo) -> None:
+    """Confirm a captured PMKID hash before the smart-wordlist step."""
+    import os
+
+    hash_name = os.path.basename(info.hash_file) if info.hash_file else "—"
+    hash_label = {
+        "wpa2": "WPA2 (hashcat mode 22000)",
+        "wpa3": "WPA3 (hashcat mode 22001)",
+    }.get(info.hash_type, "hashcat 22000/22001")
+
+    lines = [
+        "[bold bright_cyan]✓  PMKID CAPTURED[/]",
+        "",
+        f"Network: [cyan]{safe_markup(info.essid or ap.display_name)}[/]",
+        f"BSSID: [dim]{safe_markup(info.bssid or ap.bssid)}[/]",
+        f"Channel: [yellow]{info.channel or ap.channel}[/] ({ap.band_label})",
+        "",
+        f"[green]{safe_markup(info.summary)}[/]",
+        f"Hash type: [dim]{hash_label}[/]",
+        f"Saved: [dim]{safe_markup(hash_name)}[/]",
+        "",
+        "[dim]Proceeding to password recovery…[/]",
+    ]
+    console.print(Panel(
+        "\n".join(lines),
+        border_style="bright_cyan",
+        padding=(1, 2),
+        title="[bold bright_cyan]Ready to crack[/]",
+        title_align="center",
+    ))
+
+
+def show_pmkid_captured_banner(ap: AccessPoint, info: PMKIDCaptureInfo) -> None:
+    """Prominent banner before the smart-wordlist prompt after PMKID capture."""
+    import os
+
+    essid = info.essid or ap.display_name
+    channel = info.channel or ap.channel
+    hash_name = os.path.basename(info.hash_file) if info.hash_file else "—"
+    hash_label = {
+        "wpa2": "WPA2 / mode 22000",
+        "wpa3": "WPA3 / mode 22001",
+    }.get(info.hash_type, "22000/22001")
+
+    lines = [
+        "[bold bright_cyan]◆  PMKID RECOVERED[/]",
+        "[dim]Clientless capture — no handshake or deauth required[/]",
+        "",
+        f"Network: [bold cyan]{safe_markup(essid)}[/]  "
+        f"[dim]|[/]  ch{channel} ({ap.band_label})  "
+        f"[dim]|[/]  {safe_markup(ap.encryption_label)}",
+        f"BSSID: [dim]{safe_markup(info.bssid or ap.bssid)}[/]",
+        "",
+        f"[bold white]How:[/] {safe_markup(info.summary)}",
+        f"Hash: [dim]{hash_label}[/]",
+        f"Saved: [dim]{safe_markup(hash_name)}[/]",
+    ]
+
+    console.print(Panel(
+        "\n".join(lines),
+        border_style="bright_cyan",
+        padding=(1, 2),
+        title="[bold bright_cyan]PMKID success[/]",
+        title_align="center",
+    ))
+
+
+def show_handshake_captured_banner(
+    ap: AccessPoint,
+    info: HandshakeCaptureInfo,
+) -> None:
+    """Prominent banner shown before the smart-wordlist prompt after capture."""
+    import os
+
+    essid = info.essid or ap.display_name
+    channel = info.channel or ap.channel
+    band = ap.band_label
+    cap_name = os.path.basename(info.capture_file) if info.capture_file else "—"
+
+    lines = [
+        "[bold bright_yellow]!  HANDSHAKE RECOVERED[/]",
+        "[dim]Deauth was ineffective — captured during passive listen[/]",
+        "",
+        f"Network: [bold cyan]{safe_markup(essid)}[/]  "
+        f"[dim]|[/]  ch{channel} ({band})  "
+        f"[dim]|[/]  {safe_markup(ap.encryption_label)}",
+        f"Target BSSID: [dim]{safe_markup(info.target_bssid or ap.bssid)}[/]",
+    ]
+    if info.hash_bssid and info.hash_bssid.upper() != (info.target_bssid or ap.bssid).upper():
+        lines.append(
+            f"Handshake BSSID: [yellow]{safe_markup(info.hash_bssid)}[/] "
+            f"[dim](same router / shared PSK)[/]"
+        )
+    lines.extend([
+        "",
+        f"[bold white]How:[/] {safe_markup(info.summary)}",
+    ])
+    if info.deauth_rounds > 0:
+        detail = f"Deauth rounds: [yellow]{info.deauth_rounds}[/]"
+        if info.deauth_tools:
+            detail += f"  [dim]|[/]  Tools: [cyan]{safe_markup(info.deauth_tools)}[/]"
+        if info.clients > 0:
+            detail += f"  [dim]|[/]  Clients: [yellow]{info.clients}[/]"
+        lines.append(detail)
+    if info.cap_size_kb > 0:
+        lines.append(f"Capture size: [dim]{info.cap_size_kb} KB[/]")
+    lines.append(f"Saved: [dim]{safe_markup(cap_name)}[/]")
+
+    console.print(Panel(
+        "\n".join(lines),
+        border_style="bright_green",
+        padding=(1, 2),
+        title="[bold bright_green]Capture success[/]",
+        title_align="center",
+    ))
+
+
 def banner(version: str) -> None:
     console.print(Panel.fit(
         f"[bold green]WIFLUX[/] [dim]v{version}[/]\n"
-        "[cyan]Modern wireless security auditor[/]",
+        "[cyan]Modern wireless security auditor[/]\n"
+        "[dim]By Leadrogue AKA PandaFrosty[/]",
         border_style="green",
     ))
 

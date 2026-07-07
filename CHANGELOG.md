@@ -2,6 +2,51 @@
 
 All notable changes to **Wiflux** are documented here.
 
+## [Unreleased]
+
+_(nothing yet)_
+
+## [1.0.3] — 2026-07-07
+
+### Highlights
+
+- **Attack enhancements** — Algorithmic WPS PIN pre-pass, offline pixiewps from scan caps, extended PMKID capture with band rotation, client band-stalk listen, and multi-stage crack ladder (vendor defaults → hashcat rules → full dictionary)
+- **WPA2/WPA3 transition mode** — Prefer WPA2 handshake/PMKID capture and hashcat mode 22000 on mixed networks (`--no-transition-downgrade` to disable)
+- **6 GHz scanning** — `--6ghz` for Wi-Fi 6E targets (with supported adapters)
+- **PMKID success screen** — Cyan confirmation panel and banner before smart wordlist (matches handshake validation flow)
+- **Improved `--help`** — Grouped sections, colored headings, scan/scan-filters split; 89 automated tests
+
+### Added
+
+- **Adaptive deauth engine** — Tunes deauth burst, interval, and listen window from capture-health feedback. `--no-adaptive-deauth` to disable.
+- **Multi-backend deauth** — Rotate mdk4, aireplay-ng, bettercap, mdk3 (`--deauth-tools`, `--deauth-combo`, `--no-deauth-rotate`)
+- **Algorithmic WPS PIN** — MAC/vendor-derived PIN candidates before live reaver (`--no-algorithmic-wps`)
+- **Offline pixiewps** — Parse WPS from scan caps before live attacks (`--no-offline-pixie`; needs `pixiewps`, `tshark`)
+- **PMKID extended capture** — Passive-first timeout ratio and dual-band sibling rotation (`--pmkid-passive-ratio`, `--no-pmkid-band-rotate`)
+- **Client band-stalk** — Post-deauth listen on sibling bands for roaming clients (`--no-client-band-stalk`)
+- **Crack ladder** — Vendor default passwords and hashcat rules before rockyou (`--no-crack-ladder`)
+- **Handshake validation UI** — Full hcxpcapngtool validation with on-screen confirm before cracking
+- **`--new-hs`** — Force fresh handshake capture; requires deauth round before accepting passive candidate
+- **`--no-ignore-cracked`** — Re-show and re-attack networks already in the crack database
+- **CLI help overhaul** — Sectioned, colorized `-h` output (General, Scan, Scan filters, WPS, PMKID, Handshake capture, Cracking, Timeouts, …)
+
+### Fixes
+
+- **WPS offline path** — `capfile` initialized correctly on offline pixie success
+- **Help output** — Rich number highlighter disabled so channel/default values are not bolded
+- **Band flags** — Help shows `--2ghz` / `--5ghz` long form (short `-2`/`-5` still work)
+
+### Install
+
+```bash
+curl -LO https://github.com/Leadrogue/Wiflux/releases/download/v1.0.3/wiflux-1.0.3-linux-installer.tar.gz
+tar -xzf wiflux-1.0.3-linux-installer.tar.gz
+cd wiflux-1.0.3-linux-installer
+./install.sh
+```
+
+---
+
 ## [1.0.2] — 2026-07-04
 
 ### Fixes
@@ -163,6 +208,7 @@ Initial public release.
 
 > For authorized security testing only.
 
+[1.0.3]: https://github.com/Leadrogue/Wiflux/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/Leadrogue/Wiflux/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/Leadrogue/Wiflux/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/Leadrogue/Wiflux/releases/tag/v1.0.0

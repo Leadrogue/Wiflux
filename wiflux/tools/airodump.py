@@ -14,6 +14,8 @@ from ..config import WifluxConfig
 from ..models import AccessPoint, Client, EncryptionType, WPSState
 from .client_filter import is_valid_client
 from ..process import ManagedProcess
+from .radio import airodump_band_args, tag_band_for_ap
+from .transition import detect_transition_mode
 from .wash import Wash
 
 WPS_MIN_CAP_BYTES = 4096
@@ -28,12 +30,14 @@ class Airodump:
         *,
         channel: Optional[int] = None,
         bssid: Optional[str] = None,
+        band: Optional[str] = None,
         prefix: str = "wiflux",
         wps_cache: Optional[dict[str, WPSState]] = None,
     ):
         self.cfg = cfg
         self.interface = cfg.scan.interface
         self.channel = channel or (int(cfg.scan.channels.split(",")[0]) if cfg.scan.channels and "," not in cfg.scan.channels and "-" not in cfg.scan.channels else None)
+        self.band = band
         self.bssid = bssid
         self.prefix = prefix
         self.temp_dir = tempfile.mkdtemp(prefix="wiflux_")
@@ -52,14 +56,13 @@ class Airodump:
             "--write-interval", "1",
             "--output-format", "pcap,csv",
         ]
-        if self.channel:
-            cmd.extend(["-c", str(self.channel)])
-            if self.channel > 14:
-                cmd.extend(["--band", "a"])
-        elif self.cfg.scan.band_5ghz and self.cfg.scan.band_2ghz:
-            cmd.extend(["--band", "abg"])
-        elif self.cfg.scan.band_5ghz:
-            cmd.extend(["--band", "a"])
+        cmd.extend(
+            airodump_band_args(
+                self.cfg,
+                channel=self.channel,
+                band=self.band,
+            ),
+        )
         if self.bssid:
             cmd.extend(["--bssid", self.bssid])
         return cmd
@@ -214,6 +217,9 @@ class Airodump:
             essid_known=essid_known,
             beacons=int(fields[9].strip()) if fields[9].strip().isdigit() else 0,
             ivs=int(fields[10].strip()) if fields[10].strip().isdigit() else 0,
+            band=tag_band_for_ap(channel, self.cfg) if channel > 0 else "",
+            privacy=privacy,
+            transition_mode=detect_transition_mode(privacy, auth),
         )
 
     @staticmethod

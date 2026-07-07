@@ -69,8 +69,11 @@ Before the first access points appear, you'll see a **Searching** panel with a p
 ### Scan options
 
 ```bash
-# Scan 5 GHz only
-sudo wiflux --5ghz --no-2ghz
+# Include 5 GHz (also scans 2.4 GHz by default)
+sudo wiflux --5ghz
+
+# 6 GHz Wi-Fi 6E (adapter must support it)
+sudo wiflux --6ghz
 
 # Limit to specific channels
 sudo wiflux -c 1,6,11
@@ -292,9 +295,13 @@ wiflux --update-db         # Refresh IEEE OUI vendor list
 
 6. **Use `--new-hs`** — Force fresh handshake capture even if one exists in `hs/`.
 
-7. **GPU cracking** — Wiflux uses `aircrack-ng` inline; for hashcat, use `wiflux --crack` to get the right commands.
+7. **PMKID success screen** — After PMKID capture, a confirmation panel appears before the smart wordlist step (like handshake validation).
 
-8. **JSON output for scripting** — Add `--json` for machine-readable logs.
+8. **Attack tuning** — See `wiflux --help` for `--no-crack-ladder`, `--no-algorithmic-wps`, `--no-offline-pixie`, `--pmkid-passive-ratio`, and related flags.
+
+9. **GPU cracking** — Wiflux runs hashcat inline with crack ladder stages; use `wiflux --crack` for manual commands.
+
+10. **JSON output for scripting** — Add `--json` for machine-readable logs.
 
 ---
 

@@ -34,6 +34,8 @@ DEPENDENCIES: list[Dependency] = [
     Dependency("hcxpcapngtool", "hcxtools", "hcxpcapngtool", required=False),
     Dependency("hashcat", "hashcat", "hashcat (crack)", required=False),
     Dependency("packetforge-ng", "aircrack-ng", "packetforge-ng (WEP)", required=False),
+    Dependency("pixiewps", "pixiewps", "pixiewps (offline WPS)", required=False),
+    Dependency("tshark", "tshark", "tshark (WPS cap parse)", required=False),
 ]
 
 

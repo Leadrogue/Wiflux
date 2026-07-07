@@ -47,6 +47,8 @@ sudo apt install -y reaver bully hcxdumptool hcxtools hashcat
 | `hcxdumptool` | hcxdumptool | PMKID capture |
 | `hcxpcapngtool` | hcxtools | PMKID conversion |
 | `hashcat` | hashcat | GPU cracking |
+| `pixiewps` | pixiewps | Offline WPS Pixie-Dust from scan caps |
+| `tshark` | tshark | WPS frame extraction for offline pixie |
 | `packetforge-ng` | aircrack-ng | WEP ARP replay |
 
 Wiflux checks for missing dependencies at startup and can offer to install them via `apt`.
@@ -62,27 +64,27 @@ Download the latest release from **[GitHub Releases](https://github.com/Leadrogu
 Includes the wheel, install script, and quick-start docs:
 
 ```bash
-tar -xzf wiflux-1.0.2-linux-installer.tar.gz
-cd wiflux-1.0.2-linux-installer
+tar -xzf wiflux-1.0.3-linux-installer.tar.gz
+cd wiflux-1.0.3-linux-installer
 ./install.sh
 ```
 
 ### Option B — pip from wheel
 
 ```bash
-pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.2/wiflux-1.0.2-py3-none-any.whl --break-system-packages
+pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.3/wiflux-1.0.3-py3-none-any.whl --break-system-packages
 ```
 
 ### Option C — pip from source tarball
 
 ```bash
-pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.2/wiflux-1.0.2.tar.gz --break-system-packages
+pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.3/wiflux-1.0.3.tar.gz --break-system-packages
 ```
 
 ### Verify checksums
 
 ```bash
-sha256sum -c wiflux-1.0.2-checksums.sha256
+sha256sum -c wiflux-1.0.3-checksums.sha256
 ```
 
 See [docs/RELEASE.md](docs/RELEASE.md) for full release details.

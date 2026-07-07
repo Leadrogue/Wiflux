@@ -22,23 +22,29 @@ def find_monitor_interface(preferred: str) -> str | None:
     return monitors[0]
 
 
-def set_channel(iface: str, channel: int) -> str:
+def set_channel(iface: str, channel: int, band: str | None = None) -> str:
     """Tune the radio to a channel; use wide width on 5 GHz for VHT APs."""
+    from .radio import infer_band, set_channel_cmd
+
     if channel <= 0:
         return "20MHz"
-    widths = ["80MHz", "40MHz", "20MHz"] if channel > 14 else ["20MHz"]
-    for width in widths:
-        args = ["iw", "dev", iface, "set", "channel", str(channel)]
-        if width != "20MHz":
-            args.append(width)
+    resolved = band or infer_band(channel)
+    for args in set_channel_cmd(iface, channel, resolved):
         _, _, code = run(args, timeout=5)
         if code == 0:
-            return width
-    run(["iw", "dev", iface, "set", "channel", str(channel)], timeout=5)
+            if resolved == "6":
+                return "6GHz"
+            if resolved == "5":
+                return args[-1] if args[-1] in ("80MHz", "40MHz", "20MHz") else "20MHz"
+            return "20MHz"
     return "20MHz"
 
 
-def recover_interface(interface: str, channel: int | None = None) -> str:
+def recover_interface(
+    interface: str,
+    channel: int | None = None,
+    band: str | None = None,
+) -> str:
     """Reset monitor mode after hcxdumptool or other tools that reconfigure the radio.
 
     Returns the active monitor interface name (may differ from the input after hcxdumptool).
@@ -66,7 +72,7 @@ def recover_interface(interface: str, channel: int | None = None) -> str:
     iface = find_monitor_interface(iface) or iface
 
     if channel and channel > 0:
-        set_channel(iface, channel)
+        set_channel(iface, channel, band=band)
 
     time.sleep(0.3)
     return iface

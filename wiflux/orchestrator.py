@@ -11,6 +11,7 @@ from .attacks.pmkid import PMKIDAttack
 from .attacks.wep import WEPAttack
 from .attacks.wps import WPSPinAttack, WPSPixieAttack
 from .models import EncryptionType
+from .tools.transition import strategy_summary
 from .config import WifluxConfig
 from .display import print_crack, print_error, supports_live
 from .models import AccessPoint
@@ -66,6 +67,10 @@ class Orchestrator:
 
         plan_names = [c.name for c in attacks]
         self.tracker.log(f"{' → '.join(plan_names)}", tag="plan")
+        if ap.transition_mode and self.cfg.attack.transition_downgrade:
+            summary = strategy_summary(ap)
+            if summary:
+                self.tracker.log(f"[cyan]Transition mode[/] — {summary}", tag="plan")
 
         # One attack at a time — wireless interfaces can't run airodump + hcxdump together
         for idx, attack_cls in enumerate(attacks):
@@ -94,7 +99,11 @@ class Orchestrator:
                 )
             elif result.message:
                 style = "green" if result.success and result.crack else "yellow"
-                self.tracker.log(f"[{style}]{result.message}[/]", tag=attack.name)
+                from .display import safe_markup
+                self.tracker.log(
+                    f"[{style}]{safe_markup(result.message)}[/]",
+                    tag=attack.name,
+                )
 
             if result.success and result.crack:
                 self.store.save_crack(result.crack)

@@ -67,16 +67,33 @@ class Attack(ABC):
             return ""
         return name
 
-    def _resolve_crack_wordlist(self) -> tuple[str, str | None, str]:
+    def _resolve_crack_wordlist(
+        self,
+        *,
+        already_suspended: bool = False,
+    ) -> tuple[str, str | None, str]:
         """Return (wordlist_path, temp_path_to_cleanup_or_None, activity_label)."""
         from ..input import prompt_smart_wordlist
+
+        preresolved = getattr(self, "_preresolved_wordlist", None)
+        if preresolved is not None:
+            return preresolved
 
         default = self.cfg.attack.wordlist
         if not default:
             return "", None, ""
 
         default_name = os.path.basename(default)
-        built = prompt_smart_wordlist(self.cfg, self.ap, self.tracker)
+        capture_info = getattr(self, "_handshake_capture_info", None)
+        if capture_info is None:
+            capture_info = getattr(self, "_pmkid_capture_info", None)
+        built = prompt_smart_wordlist(
+            self.cfg,
+            self.ap,
+            self.tracker,
+            capture_info=capture_info,
+            already_suspended=already_suspended,
+        )
         if not built:
             return default, None, default_name
 
@@ -90,91 +107,85 @@ class Attack(ABC):
         return path, path, f"smart:{count}"
 
     def crack_hashcat(self, hash_line: str, started: float) -> str | None:
+        from ..tools.crack_ladder import discover_hashcat_rules, write_vendor_wordlist
         from ..tools.hashcat import CrackProgress, Hashcat
 
         wordlist, temp_path, wl_label = self._resolve_crack_wordlist()
         if not wordlist:
             return None
 
+        cleanup: list[str] = []
+        if temp_path:
+            cleanup.append(temp_path)
+
+        stages: list[tuple[str, str, str | None]] = []
         if wl_label.startswith("smart:"):
             count = wl_label.split(":", 1)[1]
-            crack_detail = f"ESSID-smart wordlist ({count} candidates)"
+            stages.append((wordlist, f"ESSID-smart ({count})", None))
         else:
-            crack_detail = f"Full dictionary ({wl_label})"
+            stages.append((wordlist, f"Dictionary ({wl_label})", None))
 
-        self.status("crack", crack_detail, started=started, wordlist=wl_label)
-        self.tracker.refresh()
-
-        def on_progress(progress: CrackProgress) -> None:
-            self.status(
-                "crack",
-                f"{crack_detail} — {Hashcat.format_progress(progress)}",
-                started=started,
-                progress_pct=round(progress.percent, 1),
-                speed=progress.speed,
-                eta=progress.eta_seconds,
-                candidate=progress.candidate,
-                words_done=progress.current,
-                words_total=progress.total,
-                wordlist=wl_label,
-            )
+        if self.cfg.attack.crack_ladder:
+            vendor = write_vendor_wordlist(self.ap, self.cfg)
+            if vendor:
+                vpath, vcount = vendor
+                cleanup.append(vpath)
+                stages.append((vpath, f"Vendor defaults ({vcount})", None))
+            base_wl = self.cfg.attack.wordlist
+            if base_wl and os.path.isfile(base_wl):
+                for rule in discover_hashcat_rules()[:2]:
+                    stages.append((
+                        base_wl,
+                        f"Rules ({os.path.basename(rule)})",
+                        rule,
+                    ))
+                wl_name = os.path.basename(base_wl)
+                if not any(s[0] == base_wl and s[2] is None for s in stages):
+                    stages.append((base_wl, f"Full dictionary ({wl_name})", None))
 
         try:
-            key = Hashcat.crack_hash(
-                hash_line,
-                wordlist,
-                self.ap.is_wpa3_sae,
-                on_progress=on_progress,
-                should_stop=self.should_stop,
-            )
-            if key or temp_path is None or self.should_stop():
-                return key
+            for idx, (wl_path, detail, rules) in enumerate(stages, start=1):
+                if self.should_stop():
+                    return None
+                label = f"pass {idx}/{len(stages)}: {detail}"
+                self.tracker.log(f"[cyan]hashcat[/] {label}", tag=self.name)
+                self.status("crack", label, started=started, wordlist=detail)
+                self.tracker.refresh()
 
-            wl = os.path.basename(self.cfg.attack.wordlist or "")
-            smart_count = (
-                wl_label.split(":", 1)[1]
-                if wl_label.startswith("smart:")
-                else "?"
-            )
-            self.tracker.log(
-                f"ESSID-smart wordlist finished ([yellow]{smart_count}[/] passwords) — "
-                f"[red]password not found[/], continuing with full dictionary [yellow]{wl}[/]",
-                tag=self.name,
-            )
-            self.tracker.refresh()
-            crack_detail = f"Full dictionary ({wl})"
-            self.status(
-                "crack",
-                crack_detail,
-                started=started,
-                wordlist=wl,
-            )
+                def on_progress(progress: CrackProgress, _detail=detail) -> None:
+                    self.status(
+                        "crack",
+                        f"{_detail} — {Hashcat.format_progress(progress)}",
+                        started=started,
+                        progress_pct=round(progress.percent, 1),
+                        speed=progress.speed,
+                        eta=progress.eta_seconds,
+                        candidate=progress.candidate,
+                        words_done=progress.current,
+                        words_total=progress.total,
+                        wordlist=_detail,
+                    )
 
-            def on_fallback(progress: CrackProgress) -> None:
-                self.status(
-                    "crack",
-                    f"{crack_detail} — {Hashcat.format_progress(progress)}",
-                    started=started,
-                    progress_pct=round(progress.percent, 1),
-                    speed=progress.speed,
-                    eta=progress.eta_seconds,
-                    candidate=progress.candidate,
-                    words_done=progress.current,
-                    words_total=progress.total,
-                    wordlist=wl,
+                key = Hashcat.crack_hash(
+                    hash_line,
+                    wl_path,
+                    self.ap.crack_use_wpa3,
+                    rules=rules,
+                    on_progress=on_progress,
+                    should_stop=self.should_stop,
                 )
-
-            return Hashcat.crack_hash(
-                hash_line,
-                self.cfg.attack.wordlist,
-                self.ap.is_wpa3_sae,
-                on_progress=on_fallback,
-                should_stop=self.should_stop,
-            )
+                if key:
+                    return key
+                if idx < len(stages):
+                    self.tracker.log(
+                        f"[yellow]{detail}[/] exhausted — next crack stage",
+                        tag=self.name,
+                    )
+            return None
         finally:
-            if temp_path:
+            for path in cleanup:
                 try:
-                    os.remove(temp_path)
+                    os.remove(path)
                 except OSError:
                     pass
 

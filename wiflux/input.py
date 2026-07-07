@@ -124,6 +124,64 @@ def _flush_tty_input(fd: int) -> None:
             pass
 
 
+def prompt_space_to_continue(
+    *,
+    message: str = "Press SPACE to continue",
+    timeout: float = 600.0,
+) -> None:
+    """Block until the user presses Space on the tty."""
+    from rich.panel import Panel
+
+    from .display import console
+
+    opened_fd = False
+    fd = _tty_fd()
+    if fd is None:
+        return
+    if not sys.stdin.isatty():
+        opened_fd = True
+
+    console.print()
+    console.print(Panel(
+        f"[bold bright_white]{message}[/]\n\n"
+        "[bold bright_yellow]Press SPACE[/]  "
+        "[dim]— no Enter required[/]",
+        border_style="bright_cyan",
+        padding=(1, 2),
+    ))
+
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        _flush_tty_input(fd)
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setcbreak(fd)
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                remaining = max(0.0, deadline - time.time())
+                ready, _, _ = select.select([fd], [], [], remaining)
+                if not ready:
+                    os.write(fd, b"\n")
+                    return
+                data = os.read(fd, 8)
+                if not data:
+                    return
+                if b" " in data:
+                    os.write(fd, b"\n")
+                    return
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+    except OSError:
+        return
+    finally:
+        if opened_fd:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
 def prompt_yn(*, default: bool = False, timeout: float = 300.0) -> bool:
     """Read a single Y or N key from the tty (Enter not required)."""
     if not input_available():
@@ -255,6 +313,44 @@ def confirm_action(prompt: str, *, default: bool = False) -> bool:
             pass
 
 
+def should_prompt_cached_handshake(cfg: WifluxConfig) -> bool:
+    if cfg.attack.new_handshake:
+        return False
+    if cfg.auto_mode or cfg.output.quiet or cfg.output.json_output:
+        return False
+    return input_available()
+
+
+def prompt_use_cached_handshake(
+    capfile: str,
+    ap: AccessPoint,
+    tracker: ProgressTracker,
+) -> bool:
+    """Ask whether to reuse an existing hs/ capture. True = use cache."""
+    import os
+
+    from rich.panel import Panel
+
+    from .display import console, safe_markup
+
+    basename = os.path.basename(capfile)
+    with tracker.suspend_live():
+        console.print()
+        console.print(Panel(
+            "[bold white]Existing handshake found in hs/[/]\n\n"
+            f"Network: [cyan]{safe_markup(ap.display_name)}[/]\n"
+            f"File: [dim]{safe_markup(basename)}[/]\n\n"
+            "[dim]Use this capture, or run a fresh handshake capture?[/]\n\n"
+            "    [black on bright_green]  Y  [/]  [bold bright_white]Use saved[/]"
+            "       "
+            "[black on bright_red]  N  [/]  [bold bright_white]Capture fresh[/]\n\n"
+            "[bold bright_yellow]Press Y or N — no Enter required[/]",
+            border_style="bright_yellow",
+            padding=(1, 2),
+        ))
+        return prompt_yn(default=False)
+
+
 def should_offer_smart_wordlist(cfg: WifluxConfig) -> bool:
     """True when interactive mode should offer the smart wordlist step."""
     if cfg.attack.smart_wordlist is False:
@@ -276,6 +372,9 @@ def prompt_smart_wordlist(
     cfg: WifluxConfig,
     ap: AccessPoint,
     tracker: ProgressTracker,
+    *,
+    capture_info=None,
+    already_suspended: bool = False,
 ) -> tuple[str, int] | None:
     """Preview, confirm, generate. Returns (temp_path, count) or None."""
     if not should_offer_smart_wordlist(cfg):
@@ -291,10 +390,68 @@ def prompt_smart_wordlist(
 
     essid = ap.essid or ap.display_name
 
-    if cfg.attack.yes_smart_wordlist:
-        count = _smart_wordlist_count(cfg)
-        with tracker.suspend_live():
+    def _prompt_body() -> tuple[str, int] | tuple[None, int]:
+        from .display import console
+
+        if cfg.attack.yes_smart_wordlist:
+            count = _smart_wordlist_count(cfg)
+            if capture_info is not None and capture_info.show_banner:
+                from .models import HandshakeCaptureInfo, PMKIDCaptureInfo
+
+                if isinstance(capture_info, HandshakeCaptureInfo):
+                    from .display import show_handshake_captured_banner
+
+                    show_handshake_captured_banner(ap, capture_info)
+                elif isinstance(capture_info, PMKIDCaptureInfo):
+                    from .display import show_pmkid_captured_banner
+
+                    show_pmkid_captured_banner(ap, capture_info)
+                console.print()
             path, actual = generate_and_write_smart_wordlist(ap, cfg, count)
+            return path, actual
+
+        path = ""
+        actual = 0
+        accepted = False
+        if capture_info is not None and capture_info.show_banner:
+            from .models import HandshakeCaptureInfo, PMKIDCaptureInfo
+
+            if isinstance(capture_info, HandshakeCaptureInfo):
+                from .display import show_handshake_captured_banner
+
+                show_handshake_captured_banner(ap, capture_info)
+            elif isinstance(capture_info, PMKIDCaptureInfo):
+                from .display import show_pmkid_captured_banner
+
+                show_pmkid_captured_banner(ap, capture_info)
+            console.print()
+        show_smart_wordlist_preview(ap, preview_sample, cfg)
+        from rich.panel import Panel
+
+        console.print()
+        console.print(Panel(
+            "[bold white]Use ESSID-smart wordlist before full dictionary?[/]\n\n"
+            "    [black on bright_green]  Y  [/]  [bold bright_white]Yes[/]"
+            "       "
+            "[black on bright_red]  N  [/]  [bold bright_white]No[/]\n\n"
+            "[bold bright_yellow]Press Y or N — no Enter required[/]",
+            border_style="bright_yellow",
+            padding=(1, 2),
+        ))
+        if prompt_yn(default=False):
+            accepted = True
+            count = prompt_wordlist_count()
+            path, actual = generate_and_write_smart_wordlist(ap, cfg, count)
+        if not accepted:
+            return None, 0
+        return path, actual
+
+    if cfg.attack.yes_smart_wordlist:
+        if already_suspended:
+            path, actual = _prompt_body()
+        else:
+            with tracker.suspend_live():
+                path, actual = _prompt_body()
         if not path:
             return None
         tracker.log(
@@ -315,38 +472,19 @@ def prompt_smart_wordlist(
     if not preview_sample:
         return None
 
-    from .display import console
+    if already_suspended:
+        path, actual = _prompt_body()
+    else:
+        with tracker.suspend_live():
+            path, actual = _prompt_body()
 
-    path = ""
-    actual = 0
-    accepted = False
-    with tracker.suspend_live():
-        show_smart_wordlist_preview(ap, preview_sample, cfg)
-        from rich.panel import Panel
-
-        console.print()
-        console.print(Panel(
-            "[bold white]Use ESSID-smart wordlist before full dictionary?[/]\n\n"
-            "    [black on bright_green]  Y  [/]  [bold bright_white]Yes[/]"
-            "       "
-            "[black on bright_red]  N  [/]  [bold bright_white]No[/]\n\n"
-            "[bold bright_yellow]Press Y or N — no Enter required[/]",
-            border_style="bright_yellow",
-            padding=(1, 2),
-        ))
-        if prompt_yn(default=False):
-            accepted = True
-            count = prompt_wordlist_count()
-            path, actual = generate_and_write_smart_wordlist(ap, cfg, count)
-
-    if not accepted:
-        tracker.log(
-            "[yellow]ESSID-smart wordlist declined[/] — using full dictionary",
-            tag="crack",
-        )
-        tracker.refresh()
-        return None
     if not path:
+        if actual == 0:
+            tracker.log(
+                "[yellow]ESSID-smart wordlist declined[/] — using full dictionary",
+                tag="crack",
+            )
+            tracker.refresh()
         return None
 
     tracker.log(

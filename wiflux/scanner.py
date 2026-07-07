@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import os
+import shutil
 import threading
 import time
 
 from .config import WifluxConfig
 from .display import console, print_info, print_targets, safe_markup, supports_live
-from .models import AccessPoint, EncryptionType, rank_targets
+from .models import AccessPoint, EncryptionType, WPSState, rank_targets
 from .progress import ProgressTracker, get_tracker
 from .results import ResultStore
 from .tools.airodump import Airodump
@@ -66,6 +68,7 @@ class Scanner:
                     timeout=10,
                     band_2ghz=self.cfg.scan.band_2ghz,
                     band_5ghz=self.cfg.scan.band_5ghz,
+                    band_6ghz=self.cfg.scan.band_6ghz,
                 ),
             }),
             daemon=True,
@@ -90,7 +93,27 @@ class Scanner:
             timeout=10,
             band_2ghz=self.cfg.scan.band_2ghz,
             band_5ghz=self.cfg.scan.band_5ghz,
+            band_6ghz=self.cfg.scan.band_6ghz,
         )
+
+    def _snapshot_wps_caps(self, dump: Airodump, raw: list[AccessPoint]) -> None:
+        if not self.cfg.attack.offline_pixie:
+            return
+        cap = dump.get_cap_file()
+        if not cap or not os.path.exists(cap) or os.path.getsize(cap) < 4096:
+            return
+        wps_dir = os.path.join(self.cfg.output.data_dir, "wps_scan")
+        os.makedirs(wps_dir, exist_ok=True)
+        for ap in raw:
+            if ap.wps != WPSState.UNLOCKED:
+                continue
+            safe = ap.bssid.replace(":", "-")
+            dst = os.path.join(wps_dir, f"wps_{safe}.cap")
+            try:
+                shutil.copy2(cap, dst)
+                self.tracker.set_wps_scan_cap(ap.bssid, dst)
+            except OSError:
+                pass
 
     def _scan_loop(self, dump: Airodump, scan_limit: int) -> None:
         start = time.time()
@@ -112,6 +135,7 @@ class Scanner:
                         )
             self.discovered = raw
             self.targets = self._filter(raw)
+            self._snapshot_wps_caps(dump, raw)
             self.tracker.update_scan(self.targets, decloaking=self._decloak.active)
             self.tracker.set_discovered_targets(self.discovered)
             self.tracker.refresh()

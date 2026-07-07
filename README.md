@@ -17,33 +17,37 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/Leadrogue/Wiflux?label=download)](https://github.com/Leadrogue/Wiflux/releases/latest)
 
+![Wiflux welcome screen](assets/screenshots/welcome-v1.0.3.png)
+
 ---
 
 ## Features
 
 - **Live Rich UI** — Real-time scan table with signal, encryption, WPS status, clients, and priority scoring
-- **ESSID-smart wordlist** — Targeted password candidates from network name + vendor before rockyou (preview, configurable size up to 100k)
-- **Live capture health** — EAPOL / deauth / reconnect counters during handshake capture
-- **Probing client detection** — Scan CL column includes stations probing an ESSID, not only associated clients
-- **Matrix welcome screen** — Optional splash with dependency check on startup
-- **Smart attack order** — WEP → WPS Pixie → WPS PIN → PMKID → Handshake, skipping irrelevant methods
-- **Multi-factor target ranking** — SCORE combines signal, clients, encryption, and WPS state
-- **WPS detection** — Background `wash` probing during scan with lock/status display
+- **Matrix welcome screen** — Optional splash with dependency check (`--no-splash` to skip)
+- **ESSID-smart wordlist** — Targeted candidates from network name + vendor before rockyou (preview, up to 100k)
+- **Crack ladder** — Vendor default passwords and hashcat rules before full dictionary (`--no-crack-ladder`)
+- **Adaptive deauth** — Handshake capture tunes burst/listen timing from live capture health (`--no-adaptive-deauth`)
+- **Multi-backend deauth** — mdk4, aireplay-ng, bettercap, mdk3 (`--deauth-tools`, `--deauth-combo`)
+- **PMKID enhancements** — Passive-first capture, dual-band rotation, success screen before cracking
+- **WPS enhancements** — Algorithmic PIN pre-pass, offline pixiewps from scan caps
+- **WPA2/WPA3 transition** — Prefer WPA2 capture/crack on mixed-mode APs (`--no-transition-downgrade`)
+- **6 GHz scanning** — `--6ghz` for Wi-Fi 6E (adapter-dependent)
+- **Client band-stalk** — Post-deauth listen on sibling bands for roaming stations
+- **Handshake validation** — Full capture check with on-screen confirm before hashcat
 - **Hidden SSID decloak** — Deauth probe to reveal cloaked ESSIDs during scan
-- **SQLite results store** — Track cracked networks, ignores, and export to JSON
-- **Dependency manager** — Detects missing tools and offers one-shot `apt` install
-- **Full automation** — `--auto`, timed scan (`-p` / `--pillage`), and filter flags
-- **Skip controls** — Press `Space` to skip the current attack mid-run
+- **SQLite results store** — Track cracked networks; skip by default (`--no-ignore-cracked` to re-attack)
+- **89 automated tests** — No live radio required for CI
 
 ### Supported attacks
 
 | Attack | Tools | Notes |
 |--------|-------|-------|
 | WEP | `aireplay-ng`, `aircrack-ng` | ARP replay with configurable timeout |
-| WPS Pixie-Dust | `reaver` / `bully` | Early bail on repeated timeouts |
-| WPS PIN | `reaver` / `bully` | Optional lock ignoring |
-| PMKID | `hcxdumptool`, `hcxpcapngtool` | Clientless capture |
-| WPA handshake | `aireplay-ng`, `aircrack-ng` | Burst/listen deauth rhythm |
+| WPS Pixie-Dust | `reaver` / `bully`, `pixiewps` | Offline pixie from scan caps when available |
+| WPS PIN | `reaver` / `bully` | Algorithmic MAC/vendor PINs first |
+| PMKID | `hcxdumptool`, `hcxpcapngtool` | Clientless; passive ratio + band rotation |
+| WPA handshake | Multi deauth backends, `hashcat` | Adaptive timing, band-stalk, validation UI |
 
 ---
 
@@ -51,19 +55,19 @@
 
 ### Install from release (recommended)
 
-Download the latest release from **[GitHub Releases](https://github.com/Leadrogue/Wiflux/releases/latest)**:
+Download **[v1.0.3](https://github.com/Leadrogue/Wiflux/releases/tag/v1.0.3)**:
 
 ```bash
-# Download and install the Linux installer bundle
-tar -xzf wiflux-1.0.2-linux-installer.tar.gz
-cd wiflux-1.0.2-linux-installer
+curl -LO https://github.com/Leadrogue/Wiflux/releases/download/v1.0.3/wiflux-1.0.3-linux-installer.tar.gz
+tar -xzf wiflux-1.0.3-linux-installer.tar.gz
+cd wiflux-1.0.3-linux-installer
 ./install.sh
 ```
 
 Or install directly with pip:
 
 ```bash
-pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.2/wiflux-1.0.2-py3-none-any.whl --break-system-packages
+pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.3/wiflux-1.0.3-py3-none-any.whl --break-system-packages
 ```
 
 ### Install from source
@@ -76,15 +80,14 @@ pip install -e . --break-system-packages
 
 ### Run
 
-On Kali/Debian, `sudo` may not include `/usr/local/bin` in `PATH`. Use one of:
+On Kali/Debian, `sudo` may not include `/usr/local/bin` in `PATH`:
 
 ```bash
 sudo env PATH="/usr/local/bin:$PATH" wiflux --kill --restore   # Interactive audit
 sudo env PATH="/usr/local/bin:$PATH" wiflux --auto -p 30       # Auto-attack after 30s scan
-# or: sudo /usr/local/bin/wiflux --kill --restore
 ```
 
-See the full [Installation Guide](INSTALL.md), [Release downloads](docs/RELEASE.md), and [Tutorial](docs/TUTORIAL.md).
+See [INSTALL.md](INSTALL.md), [docs/RELEASE.md](docs/RELEASE.md), and [docs/TUTORIAL.md](docs/TUTORIAL.md).
 
 ---
 
@@ -93,37 +96,43 @@ See the full [Installation Guide](INSTALL.md), [Release downloads](docs/RELEASE.
 | Document | Description |
 |----------|-------------|
 | [INSTALL.md](INSTALL.md) | Requirements, adapter setup, wordlists, troubleshooting |
-| [docs/RELEASE.md](docs/RELEASE.md) | Download and install from GitHub Releases |
-| [docs/TUTORIAL.md](docs/TUTORIAL.md) | Step-by-step walkthrough from first run to attacks |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup and pull request guidelines |
+| [CHANGELOG.md](CHANGELOG.md) | Version history and release notes |
+| [docs/RELEASE.md](docs/RELEASE.md) | Download and verify release artifacts |
+| [docs/TUTORIAL.md](docs/TUTORIAL.md) | Step-by-step walkthrough |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup and tests |
 
 ---
 
 ## Usage examples
 
 ```bash
-# Show all options
-wiflux --help
+wiflux --help                    # Grouped, colorized CLI reference
 
-# 5 GHz scan, auto-attack
+# 5 GHz + auto-attack
 sudo wiflux --5ghz --auto -p 45
 
-# Target a specific network
-sudo wiflux -b AA:BB:CC:DD:EE:FF --auto
+# 6 GHz scan (Wi-Fi 6E adapter required)
+sudo wiflux --6ghz --auto -c 37,53
 
-# WPS Pixie-Dust only on WPS networks
-sudo wiflux --wps --wps-only --pixie --auto
+# Target one network; re-attack even if already cracked
+sudo wiflux --no-ignore-cracked -b AA:BB:CC:DD:EE:FF
 
-# Capture handshakes without cracking
+# Fresh handshake; ignore saved caps in hs/
+sudo wiflux --new-hs -b AA:BB:CC:DD:EE:FF
+
+# PMKID only
+sudo wiflux --pmkid --auto -p 60
+
+# Capture only
 sudo wiflux --skip-crack --auto -p 30
 
-# Utility commands (no sudo needed)
+# Utilities (no sudo)
 wiflux --cracked
 wiflux --check capture.cap
 wiflux --export results.json
 ```
 
-### Key options
+### Key options (v1.0.3)
 
 | Flag | Description |
 |------|-------------|
@@ -131,31 +140,31 @@ wiflux --export results.json
 | `--kill` / `--restore` | Kill interfering processes / restore managed mode |
 | `-p SECONDS` | Auto-attack after N seconds of scanning |
 | `--auto` | Non-interactive mode |
-| `--5ghz` | Include 5 GHz channels |
-| `--wps` / `--wpa` / `--wep` | Filter scan results |
-| `--pixie` / `--no-pixie` | Control WPS attack mode |
-| `--pmkid` / `--no-pmkid` | Control PMKID capture |
-| `--deauth-burst` / `--deauth-listen` | Handshake deauth timing (default 10s / 20s) |
+| `-5` / `--5ghz` | Include 5 GHz channels |
+| `--6ghz` | Include 6 GHz (Wi-Fi 6E) |
+| `--no-ignore-cracked` | Show networks already in crack database |
+| `--new-hs` | Ignore saved handshakes; force live capture |
+| `--no-transition-downgrade` | Do not prefer WPA2 on WPA2+WPA3 APs |
+| `--no-crack-ladder` | Skip vendor/rules stages before full dictionary |
+| `--no-algorithmic-wps` | Skip MAC/vendor WPS PIN pre-pass |
+| `--no-offline-pixie` | Skip offline pixiewps from scan caps |
+| `--no-client-band-stalk` | Disable post-deauth band-hop listen |
+| `--no-pmkid-band-rotate` | Disable PMKID dual-band rotation |
+| `--pmkid-passive-ratio` | PMKID passive capture fraction (0.2–0.75) |
+| `--deauth-burst` / `--deauth-listen` | Baseline deauth packets / listen window (default 5 / 8) |
+| `--deauth-tools` | Comma-separated deauth backends |
 | `--dict FILE` | Custom wordlist |
-| `--no-splash` | Skip welcome screen |
+| `--no-splash` | Skip Matrix welcome screen |
 
 ---
 
-## Architecture
+## Development
 
+```bash
+cd Wiflux
+pip install -e ".[dev]" --break-system-packages
+python -m pytest tests/test_wiflux.py -q
 ```
-wiflux/
-├── cli.py           # Entry point, argument parsing
-├── scanner.py       # AP discovery, WPS probe, decloak
-├── orchestrator.py  # Attack sequencing
-├── progress.py      # Live Rich UI
-├── results.py       # SQLite persistence
-├── dependencies.py  # Tool detection + apt install
-├── attacks/         # WEP, WPS, PMKID, handshake
-└── tools/           # Wrappers for aircrack-ng, reaver, hashcat, etc.
-```
-
-Configuration uses **dataclasses** (`WifluxConfig`) instead of global singletons — easy to test, extend, and serialize to JSON.
 
 ---
 
@@ -164,8 +173,8 @@ Configuration uses **dataclasses** (`WifluxConfig`) instead of global singletons
 - Linux (Kali, Parrot, etc.)
 - Python 3.10+
 - Wi-Fi adapter with monitor mode + injection
-- [aircrack-ng](https://www.aircrack-ng.org/) suite (required)
-- [reaver](https://github.com/t6x/reaver-wps-fork-t6x), [hcxdumptool](https://github.com/ZerBea/hcxdumptool), [hashcat](https://hashcat.net/hashcat/) (optional, recommended)
+- [aircrack-ng](https://www.aircrack-ng.org/) (required)
+- [reaver](https://github.com/t6x/reaver-wps-fork-t6x), [hcxdumptool](https://github.com/ZerBea/hcxdumptool), [hashcat](https://hashcat.net/hashcat/), [pixiewps](https://github.com/wiire-a/pixiewps), [tshark](https://www.wireshark.org/) (optional, recommended)
 
 ---
 

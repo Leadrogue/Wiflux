@@ -60,22 +60,28 @@ class Aireplay:
         *,
         essid: str | None = None,
         focus: str | None = None,
-    ) -> None:
+        count: int | None = None,
+    ) -> str:
         """Deauth broadcast plus one active client — avoids AP nonce reset."""
+        from .deauth_backends import DeauthRoundRequest, HandshakeDeauthDispatcher
+
         if cfg.attack.no_deauth:
-            return
-        if which("mdk4"):
-            Aireplay.mdk4_deauth(cfg, bssid, None, count=HANDSHAKE_DEAUTH_PACKETS)
-            target = focus or (clients[0] if clients else None)
-            if target:
-                Aireplay.mdk4_deauth(cfg, bssid, target, count=HANDSHAKE_DEAUTH_PACKETS)
-            return
-        count = HANDSHAKE_DEAUTH_PACKETS
-        Aireplay.deauth_target(cfg, bssid, None, essid=essid, count=count)
-        if focus:
-            Aireplay.deauth_target(cfg, bssid, focus, essid=essid, count=count)
-        elif clients:
-            Aireplay.deauth_target(cfg, bssid, clients[0], essid=essid, count=count)
+            return "none"
+        dispatcher = HandshakeDeauthDispatcher(
+            cfg,
+            rotate=cfg.attack.deauth_rotate,
+            combo=cfg.attack.deauth_combo,
+        )
+        return dispatcher.run_round(
+            cfg,
+            DeauthRoundRequest(
+                bssid=bssid,
+                clients=clients,
+                essid=essid,
+                focus=focus,
+                packet_count=max(1, int(count or HANDSHAKE_DEAUTH_PACKETS)),
+            ),
+        )
 
     @staticmethod
     def mdk4_deauth(

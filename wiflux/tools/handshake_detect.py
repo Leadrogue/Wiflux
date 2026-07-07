@@ -9,6 +9,8 @@ import subprocess
 import tempfile
 import time
 
+from dataclasses import dataclass
+
 from ..process import run, which
 
 _MAC = r"([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}"
@@ -88,32 +90,27 @@ def aircrack_has_handshake(capfile: str, bssid: str) -> bool:
     return "1 handshake" in low or "wpa (1 handshake)" in low
 
 
-def extract_hash(capfile: str, bssid: str) -> str | None:
-    """Return a hashcat 22000 line when the capture contains a crackable handshake."""
-    if not which("hcxpcapngtool"):
-        return None
-    if not os.path.exists(capfile) or os.path.getsize(capfile) < 24:
-        return None
+def extract_hash(
+    capfile: str,
+    bssid: str,
+    *,
+    prefer_wpa2: bool = False,
+    allow_wpa3_fallback: bool = True,
+) -> str | None:
+    """Return a hashcat 22000/22001 line for *bssid* in *capfile*."""
+    from .transition import select_hash_line
 
-    bssid_target = _bssid_norm(bssid)
-    tmp_hash = f"{capfile}.wiflux_extract.22000"
-    try:
-        if os.path.exists(tmp_hash):
-            os.remove(tmp_hash)
-        run(["hcxpcapngtool", "-o", tmp_hash, capfile], timeout=30)
-        if not os.path.exists(tmp_hash) or os.path.getsize(tmp_hash) == 0:
-            return None
-        with open(tmp_hash) as f:
-            for line in f:
-                parts = line.strip().split("*")
-                if len(parts) >= 4 and parts[3].lower().replace(":", "") == bssid_target:
-                    return line.strip()
-    except (subprocess.TimeoutExpired, OSError):
-        return None
-    finally:
-        if os.path.exists(tmp_hash):
-            os.remove(tmp_hash)
-    return None
+    pairs = [
+        (mac, line)
+        for mac, line in list_hash_bssids(capfile)
+        if _bssid_norm(mac) == _bssid_norm(bssid)
+    ]
+    picked = select_hash_line(
+        pairs,
+        prefer_wpa2=prefer_wpa2,
+        allow_wpa3_fallback=allow_wpa3_fallback,
+    )
+    return picked[1] if picked else None
 
 
 def check_handshake(
@@ -156,6 +153,79 @@ def check_handshake(
 
 def reset_check_cache() -> None:
     _last_check.clear()
+
+
+@dataclass(frozen=True)
+class HandshakeValidation:
+    valid: bool
+    bssid: str = ""
+    hash_line: str = ""
+    message: str = ""
+    four_way_complete: bool = False
+
+
+def validate_handshake_capture(
+    capfile: str,
+    prefer_bssids: list[str],
+    *,
+    essid: str | None = None,
+    prefer_wpa2: bool = False,
+) -> HandshakeValidation:
+    """Full validation before cracking — always bypasses live poll cache."""
+    from .transition import hash_key_type
+
+    if not capfile or not os.path.exists(capfile) or os.path.getsize(capfile) < 24:
+        return HandshakeValidation(valid=False, message="Capture file missing or too small")
+
+    reset_check_cache()
+    bssid = find_hash_bssid(
+        capfile,
+        prefer_bssids,
+        min_interval=0,
+        prefer_wpa2=prefer_wpa2,
+        allow_wpa3_fallback=True,
+    )
+    if not bssid:
+        return HandshakeValidation(
+            valid=False,
+            message="No crackable WPA handshake found in capture",
+        )
+
+    hash_line = extract_hash(
+        capfile,
+        bssid,
+        prefer_wpa2=prefer_wpa2,
+        allow_wpa3_fallback=True,
+    )
+    if not hash_line:
+        return HandshakeValidation(
+            valid=False,
+            bssid=bssid,
+            message="hcxpcapngtool could not extract a hashcat hash",
+        )
+
+    four_way = tshark_has_handshake(capfile, bssid) if which("tshark") else True
+    if four_way:
+        detail = "Complete 4-way handshake — ready to crack"
+    else:
+        detail = "Hash extractable — EAPOL 4-way incomplete but may still crack"
+
+    key_type = hash_key_type(hash_line)
+    if prefer_wpa2 and key_type == "wpa2":
+        detail += " — WPA2 downgrade path"
+    elif prefer_wpa2 and key_type == "wpa3":
+        detail += " — WPA3/SAE only (downgrade missed)"
+
+    if essid:
+        detail += f" ({essid})"
+
+    return HandshakeValidation(
+        valid=True,
+        bssid=bssid,
+        hash_line=hash_line,
+        message=detail,
+        four_way_complete=four_way,
+    )
 
 
 def list_hash_bssids(capfile: str) -> list[tuple[str, str]]:
@@ -201,9 +271,20 @@ def find_hash_bssid(
     bssids: list[str],
     *,
     min_interval: float = 0.0,
+    prefer_wpa2: bool = False,
+    allow_wpa3_fallback: bool = True,
 ) -> str | None:
     """Return the first BSSID from *bssids* with a crackable handshake in *capfile*."""
     for bssid in bssids:
+        if prefer_wpa2:
+            if extract_hash(
+                capfile,
+                bssid,
+                prefer_wpa2=True,
+                allow_wpa3_fallback=allow_wpa3_fallback,
+            ):
+                return bssid
+            continue
         if check_handshake(capfile, bssid, min_interval=min_interval):
             return bssid
     return None
@@ -212,16 +293,19 @@ def find_hash_bssid(
 def extract_hash_preferred(
     capfile: str,
     prefer_bssids: list[str],
+    *,
+    prefer_wpa2: bool = False,
 ) -> tuple[str, str] | None:
     """Return (bssid, hash_line), preferring *prefer_bssids* then any other in the cap."""
+    from .transition import select_hash_line
+
     pairs = list_hash_bssids(capfile)
-    if not pairs:
-        return None
-    prefer = {_bssid_norm(b) for b in prefer_bssids if b}
-    for bssid, line in pairs:
-        if _bssid_norm(bssid) in prefer:
-            return bssid, line
-    return pairs[0]
+    return select_hash_line(
+        pairs,
+        prefer_bssids=prefer_bssids,
+        prefer_wpa2=prefer_wpa2,
+        allow_wpa3_fallback=True,
+    )
 
 
 def cap_has_reconnect(capfile: str, bssid: str) -> bool:

@@ -17,10 +17,10 @@ from ..models import AccessPoint
 from ..process import ManagedProcess, ProcessPool, run, which
 
 
-def hcx_channel(channel: int) -> str:
-    """Format channel for hcxdumptool 7.x (e.g. 6a, 36b)."""
-    band = "a" if channel <= 14 else "b"
-    return f"{channel}{band}"
+def hcx_channel(channel: int, band: str | None = None) -> str:
+    """Format channel for hcxdumptool 7.x (e.g. 11a, 44b, 37c)."""
+    from .radio import hcx_channel as _hcx_channel
+    return _hcx_channel(channel, band=band)
 
 
 class HcxTools:
@@ -33,6 +33,8 @@ class HcxTools:
         on_tick: Optional[Callable[[float, int], None]] = None,
         on_log: Optional[Callable[[str], None]] = None,
         should_stop: Optional[Callable[[], bool]] = None,
+        *,
+        prefer_wpa2: bool = False,
     ) -> str | None:
         if not which("hcxdumptool") or not which("hcxpcapngtool"):
             if on_log:
@@ -47,7 +49,10 @@ class HcxTools:
             bpf_file = HcxTools._write_bpf_filter(ap.bssid)
             cmd = HcxTools._build_hcxdump_cmd(interface, outfile, ap, bpf_file)
             if on_log:
-                on_log(f"hcxdumptool -c {hcx_channel(ap.channel)} → {os.path.basename(outfile)}")
+                on_log(
+                    f"hcxdumptool -c {hcx_channel(ap.channel, band=ap.radio_band)} "
+                    f"→ {os.path.basename(outfile)}",
+                )
 
             start = time.time()
             proc = ManagedProcess(cmd)
@@ -67,7 +72,11 @@ class HcxTools:
                     now = time.time()
                     if now - last_extract >= 3.0:
                         last_extract = now
-                        hash_val = HcxTools._extract_pmkid(outfile, ap)
+                        hash_val = HcxTools._extract_pmkid(
+                            outfile,
+                            ap,
+                            prefer_wpa2=prefer_wpa2,
+                        )
                         if hash_val:
                             proc.kill()
                             return hash_val
@@ -83,7 +92,7 @@ class HcxTools:
                 os.unlink(bpf_file)
 
         if os.path.exists(outfile) and os.path.getsize(outfile) > 0:
-            return HcxTools._extract_pmkid(outfile, ap)
+            return HcxTools._extract_pmkid(outfile, ap, prefer_wpa2=prefer_wpa2)
         return None
 
     @staticmethod
@@ -93,7 +102,7 @@ class HcxTools:
             "hcxdumptool",
             "-i", interface,
             "-w", outfile,
-            "-c", hcx_channel(ap.channel),
+            "-c", hcx_channel(ap.channel, band=ap.radio_band),
             f"--bpf={bpf_file}",
             "--exitoneapol=1",
             "-t", "2",
@@ -117,16 +126,24 @@ class HcxTools:
         return path
 
     @staticmethod
-    def _extract_pmkid(pcapng: str, ap: AccessPoint) -> str | None:
+    def _extract_pmkid(
+        pcapng: str,
+        ap: AccessPoint,
+        *,
+        prefer_wpa2: bool = False,
+    ) -> str | None:
+        from .transition import select_hash_line
+
         if not os.path.exists(pcapng) or os.path.getsize(pcapng) < 24:
             return None
         tmp_hash = pcapng + ".22000"
         if os.path.exists(tmp_hash):
             os.remove(tmp_hash)
-        _, stderr, code = run(["hcxpcapngtool", "-o", tmp_hash, pcapng], timeout=30)
-        if not os.path.exists(tmp_hash) or os.path.getsize(tmp_hash) == 0:
+        _, _, code = run(["hcxpcapngtool", "-o", tmp_hash, pcapng], timeout=30)
+        if code != 0 or not os.path.exists(tmp_hash) or os.path.getsize(tmp_hash) == 0:
             return None
         bssid_target = ap.bssid.replace(":", "").lower()
+        pairs: list[tuple[str, str]] = []
         with open(tmp_hash) as f:
             for line in f:
                 line = line.strip()
@@ -134,8 +151,16 @@ class HcxTools:
                     continue
                 parts = line.split("*")
                 if len(parts) >= 4 and parts[3].lower().replace(":", "") == bssid_target:
-                    return line
-        return None
+                    mac = parts[3]
+                    if len(mac) == 12 and ":" not in mac:
+                        mac = ":".join(mac[i:i + 2] for i in range(0, 12, 2)).upper()
+                    pairs.append((mac.upper(), line))
+        picked = select_hash_line(
+            pairs,
+            prefer_wpa2=prefer_wpa2,
+            allow_wpa3_fallback=True,
+        )
+        return picked[1] if picked else None
 
     @staticmethod
     def cap_to_hash(capfile: str, bssid: str, essid: str | None) -> str | None:
@@ -185,6 +210,7 @@ class Hashcat:
         wordlist: str,
         wpa3: bool = False,
         *,
+        rules: str | None = None,
         on_progress: Optional[Callable[[CrackProgress], None]] = None,
         should_stop: Optional[Callable[[], bool]] = None,
     ) -> str | None:
@@ -204,6 +230,8 @@ class Hashcat:
                 "--force", "-w", "3",
                 "--status", "--status-json", "--status-timer=1",
             ]
+            if rules and os.path.isfile(rules):
+                cmd.extend(["-r", rules])
             popen_kwargs: dict = {"stdout": subprocess.PIPE, "stderr": subprocess.STDOUT}
             if on_progress:
                 popen_kwargs.update(text=True, encoding="utf-8", errors="replace", bufsize=1)

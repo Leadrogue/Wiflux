@@ -25,9 +25,12 @@ class Wash:
         timeout: int = 12,
         band_2ghz: bool = True,
         band_5ghz: bool = True,
+        band_6ghz: bool = False,
     ) -> dict[str, WPSState]:
         """Probe WPS on the live interface (airodump must be stopped)."""
         if not Wash.available():
+            return {}
+        if band_6ghz and not band_2ghz and not band_5ghz:
             return {}
 
         cmd = ["wash", "-i", interface, "-j", "-a"]

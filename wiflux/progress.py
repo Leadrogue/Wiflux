@@ -12,6 +12,7 @@ from typing import Any, Callable, Optional
 
 from rich.align import Align
 from rich.console import Console, Group
+from rich.errors import MarkupError
 from rich.live import Live
 from rich.panel import Panel
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
@@ -60,6 +61,11 @@ class ProgressTracker:
         self._skip_listener: Optional[Any] = None
         self._show_skip_hint: bool = False
         self._live_suspended: bool = False
+        self.wps_scan_caps: dict[str, str] = {}
+
+    def set_wps_scan_cap(self, bssid: str, cap_path: str) -> None:
+        with self._lock:
+            self.wps_scan_caps[bssid.upper()] = cap_path
 
     def log(self, msg: str, *, tag: str | None = None) -> None:
         ts = time.strftime("%H:%M:%S")
@@ -324,9 +330,21 @@ class ProgressTracker:
             padding=(1, 2),
         )
 
+    def _sanitize_log_markup(self, entry: str) -> str:
+        from rich.markup import render as render_markup
+
+        try:
+            render_markup(entry)
+            return entry
+        except MarkupError:
+            return safe_markup(entry)
+
     def _render_logs(self) -> Panel:
         with self._lock:
-            body = "\n".join(self.logs) if self.logs else "[dim]No events yet[/]"
+            if self.logs:
+                body = "\n".join(self._sanitize_log_markup(e) for e in self.logs)
+            else:
+                body = "[dim]No events yet[/]"
         return Panel(body, title="[dim]Activity[/]", border_style="dim", padding=(0, 1))
 
     def _compact_status(self) -> str:
@@ -387,8 +405,15 @@ class ProgressTracker:
                 self.render(), console=console,
                 refresh_per_second=refresh, transient=False,
             )
-            with self._live:
+            self._live.start()
+            try:
                 yield self
+            finally:
+                try:
+                    self._live.stop()
+                except (MarkupError, Exception):
+                    pass
+                self._live = None
         else:
             self._fallback = True
             try:

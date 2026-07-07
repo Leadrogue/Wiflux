@@ -46,6 +46,9 @@ class AccessPoint:
     clients: list[Client] = field(default_factory=list)
     decloaked: bool = False
     manufacturer: str = ""
+    band: str = ""  # "2", "5", or "6" (GHz); empty = infer from channel / scan context
+    privacy: str = ""
+    transition_mode: bool = False
 
     @property
     def display_name(self) -> str:
@@ -62,6 +65,27 @@ class AccessPoint:
         return self.encryption == EncryptionType.WPA3 or "SAE" in self.auth.upper()
 
     @property
+    def crack_use_wpa3(self) -> bool:
+        """Hashcat mode: use 22001 only for pure WPA3; transition APs crack as WPA2."""
+        if self.transition_mode:
+            return False
+        return self.is_wpa3_sae
+
+    @property
+    def radio_band(self) -> str:
+        if self.band in ("2", "5", "6"):
+            return self.band
+        if self.channel <= 14:
+            return "2"
+        if self.channel <= 177:
+            return "5"
+        return "6"
+
+    @property
+    def band_label(self) -> str:
+        return {"2": "2.4 GHz", "5": "5 GHz", "6": "6 GHz"}.get(self.radio_band, "unknown band")
+
+    @property
     def encryption_label(self) -> str:
         labels = {
             EncryptionType.WEP: "WEP",
@@ -73,7 +97,9 @@ class AccessPoint:
             EncryptionType.UNKNOWN: "???",
         }
         label = labels.get(self.encryption, "???")
-        if self.encryption in (EncryptionType.WPA, EncryptionType.WPA2) and "PSK" in self.auth:
+        if self.transition_mode:
+            label = "WPA2/3-T"
+        elif self.encryption in (EncryptionType.WPA, EncryptionType.WPA2) and "PSK" in self.auth:
             label += "-P"
         elif self.is_wpa3_sae:
             label += "-S"
@@ -91,6 +117,8 @@ class AccessPoint:
             s += 10
         if self.encryption == EncryptionType.WEP:
             s += 50
+        if self.transition_mode:
+            s += 12
         if self.is_enterprise:
             s -= 1000
         if self.encryption == EncryptionType.OPEN:
@@ -101,6 +129,36 @@ class AccessPoint:
 def rank_targets(targets: list[AccessPoint]) -> list[AccessPoint]:
     """Return targets sorted by score (highest first). Use for display AND selection."""
     return sorted(targets, key=lambda t: t.score(), reverse=True)
+
+
+@dataclass
+class HandshakeCaptureInfo:
+    """How a WPA handshake was obtained before cracking."""
+    summary: str
+    capture_file: str = ""
+    channel: int = 0
+    hash_bssid: str = ""
+    target_bssid: str = ""
+    essid: str = ""
+    deauth_rounds: int = 0
+    deauth_tools: str = ""
+    clients: int = 0
+    source: str = "live"  # live | cached | sibling_band
+    cap_size_kb: int = 0
+    show_banner: bool = False  # prominent banner on smart-wordlist screen
+
+
+@dataclass
+class PMKIDCaptureInfo:
+    """How a PMKID hash was obtained before cracking."""
+    summary: str
+    hash_file: str = ""
+    channel: int = 0
+    bssid: str = ""
+    essid: str = ""
+    hash_type: str = ""  # wpa2 | wpa3 | unknown
+    source: str = "live"  # live | cached
+    show_banner: bool = True
 
 
 @dataclass

