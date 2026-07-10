@@ -30,13 +30,13 @@ class Wash:
         """Probe WPS on the live interface (airodump must be stopped)."""
         if not Wash.available():
             return {}
-        if band_6ghz and not band_2ghz and not band_5ghz:
-            return {}
 
+        # wash has no native 6 GHz flag; 6-only scans use -5 as best-effort
+        # (dual-band APs often answer on 5 GHz) instead of skipping entirely.
         cmd = ["wash", "-i", interface, "-j", "-a"]
         if band_2ghz:
             cmd.append("-2")
-        if band_5ghz:
+        if band_5ghz or band_6ghz:
             cmd.append("-5")
 
         blob = Wash._run_wash(cmd, timeout)

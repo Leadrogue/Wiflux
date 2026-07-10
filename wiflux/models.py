@@ -66,10 +66,13 @@ class AccessPoint:
 
     @property
     def crack_use_wpa3(self) -> bool:
-        """Hashcat mode: use 22001 only for pure WPA3; transition APs crack as WPA2."""
-        if self.transition_mode:
-            return False
-        return self.is_wpa3_sae
+        """Whether to use hashcat mode 22001 (WPA-PMK).
+
+        Always False for dictionary attacks: mode 22001 expects precomputed
+        PMKs, not passwords. Password cracking uses mode 22000 (WPA-PBKDF2)
+        for WPA2 and WPA3-SAE captures from hcxtools.
+        """
+        return False
 
     @property
     def radio_band(self) -> str:
@@ -156,7 +159,7 @@ class PMKIDCaptureInfo:
     channel: int = 0
     bssid: str = ""
     essid: str = ""
-    hash_type: str = ""  # wpa2 | wpa3 | unknown
+    hash_type: str = ""  # pmkid | eapol | unknown (legacy: wpa2/wpa3)
     source: str = "live"  # live | cached
     show_banner: bool = True
 

@@ -303,12 +303,30 @@ class HandshakeAttack(Attack):
                     already_suspended=True,
                 )
 
-        key = self.crack_hashcat(hash_line, capture_started)
+        key = self.crack_hashcat(
+            hash_line,
+            capture_started,
+            method="handshake",
+            capture_file=saved,
+        )
         if self.should_stop():
             return self.skipped_result()
         if key:
+            # Attribute the crack to the BSSID that produced the hash when known.
+            from ..tools.transition import bssid_from_hash_line
+            crack_bssid = (
+                getattr(self, "_cap_hit_bssid", None)
+                or bssid_from_hash_line(hash_line)
+                or self.ap.bssid
+            ).upper()
+            if crack_bssid != self.ap.bssid.upper():
+                self.tracker.log(
+                    f"Key applies to hash BSSID [cyan]{crack_bssid}[/] "
+                    f"(selected [dim]{self.ap.bssid}[/])",
+                    tag="handshake",
+                )
             crack = CrackResult(
-                bssid=self.ap.bssid, essid=self.ap.display_name, key=key,
+                bssid=crack_bssid, essid=self.ap.display_name, key=key,
                 method="handshake", capture_file=saved,
                 cracked_at=datetime.now(timezone.utc).isoformat(),
             )

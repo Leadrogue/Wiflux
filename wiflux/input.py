@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 
 class SkipListener:
-    """Listen for Space on /dev/tty to skip the current attack."""
+    """Listen for Space on /dev/tty (scan pause/resume or attack skip)."""
 
     def __init__(self, tracker: ProgressTracker):
         self.tracker = tracker
@@ -46,13 +46,18 @@ class SkipListener:
     def _run(self) -> None:
         fd: Optional[int] = None
         try:
-            fd = os.open("/dev/tty", os.O_RDONLY)
+            fd = os.open("/dev/tty", os.O_RDWR)
             self._fd = fd
             old = termios.tcgetattr(fd)
             self._old_term = (fd, old)
             tty.setcbreak(fd)
             while not self._stop.is_set():
-                if getattr(self.tracker, "_live_suspended", False):
+                # During attack prompts Live is suspended and Space must not fire.
+                # During scan pause Live is also suspended, but Space must still
+                # resume — so only ignore suspended state outside scan pause.
+                if getattr(self.tracker, "_live_suspended", False) and not getattr(
+                    self.tracker, "scan_paused", False
+                ):
                     time.sleep(0.05)
                     continue
                 ready, _, _ = select.select([fd], [], [], 0.2)
@@ -62,7 +67,7 @@ class SkipListener:
                 if not data:
                     break
                 if b" " in data:
-                    self.tracker.request_skip()
+                    self.tracker.handle_space()
                 # Other keys are discarded here — must not run during prompts.
         except OSError:
             pass
@@ -95,7 +100,7 @@ def _tty_fd() -> int | None:
         return sys.stdin.fileno()
     if os.path.exists("/dev/tty"):
         try:
-            return os.open("/dev/tty", os.O_RDONLY | os.O_WRONLY)
+            return os.open("/dev/tty", os.O_RDWR)
         except OSError:
             return None
     return None
@@ -275,7 +280,7 @@ def confirm_action(prompt: str, *, default: bool = False) -> bool:
     if not input_available():
         return default
     try:
-        fd = os.open("/dev/tty", os.O_RDONLY | os.O_WRONLY)
+        fd = os.open("/dev/tty", os.O_RDWR)
     except OSError:
         return default
     try:
@@ -358,6 +363,68 @@ def should_offer_smart_wordlist(cfg: WifluxConfig) -> bool:
     if cfg.auto_mode or cfg.output.quiet or cfg.output.json_output:
         return False
     return True
+
+
+def prompt_resume_crack(
+    cfg: WifluxConfig,
+    checkpoint,
+    tracker: ProgressTracker,
+) -> bool:
+    """Ask whether to resume a durable crack checkpoint. True = resume."""
+    if not getattr(cfg.attack, "crack_checkpoints", True):
+        return False
+    if getattr(cfg.attack, "yes_resume_crack", False):
+        tracker.log(
+            "[green]Resuming crack checkpoint[/] (--yes-resume-crack)",
+            tag="crack",
+        )
+        tracker.refresh()
+        return True
+    # Auto/quiet/json: resume without prompting so unattended runs continue.
+    if cfg.auto_mode or cfg.output.quiet or cfg.output.json_output:
+        tracker.log(
+            "[green]Resuming crack checkpoint[/] (auto/quiet mode)",
+            tag="crack",
+        )
+        tracker.refresh()
+        return True
+    if not input_available():
+        return True
+
+    from rich.panel import Panel
+
+    from .display import console, safe_markup
+
+    body_lines = [
+        "[bold white]Incomplete crack checkpoint found[/]\n",
+    ]
+    for line in checkpoint.summary_lines():
+        body_lines.append(safe_markup(line))
+    body_lines.extend([
+        "",
+        "Resume hashcat from the saved stage/progress?",
+        "",
+        "    [black on bright_green]  Y  [/]  [bold bright_white]Resume[/]"
+        "       "
+        "[black on bright_red]  N  [/]  [bold bright_white]Start over[/]\n",
+        "[bold bright_yellow]Press Y or N — no Enter required[/]",
+    ])
+
+    with tracker.suspend_live():
+        console.print()
+        console.print(Panel(
+            "\n".join(body_lines),
+            border_style="bright_cyan",
+            padding=(1, 2),
+        ))
+        accepted = prompt_yn(default=True)
+
+    if accepted:
+        tracker.log("[green]Crack checkpoint resume accepted[/]", tag="crack")
+    else:
+        tracker.log("[yellow]Crack checkpoint declined — starting fresh[/]", tag="crack")
+    tracker.refresh()
+    return accepted
 
 
 def _smart_wordlist_count(cfg: WifluxConfig) -> int:

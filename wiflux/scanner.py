@@ -35,6 +35,9 @@ class Scanner:
         )
 
         self.tracker.begin_scan(scan_limit)
+        # Space pauses/resumes the scan so the user can copy text from the UI.
+        if not self.cfg.output.quiet and not self.cfg.output.json_output:
+            self.tracker.enable_scan_controls()
 
         try:
             if use_live:
@@ -49,6 +52,8 @@ class Scanner:
                     self._scan_loop(dump, scan_limit)
         except KeyboardInterrupt:
             pass  # keep whatever we collected
+        finally:
+            self.tracker.disable_scan_controls()
 
         self.targets = rank_targets(self.targets)
         return self.targets
@@ -116,8 +121,12 @@ class Scanner:
                 pass
 
     def _scan_loop(self, dump: Airodump, scan_limit: int) -> None:
-        start = time.time()
         while True:
+            # Space toggles pause — freeze parsing/decloak/UI updates for copy.
+            if self.tracker.is_scan_paused():
+                time.sleep(0.15)
+                continue
+
             prev_map = {a.bssid: a for a in self.targets}
             raw = dump.parse_targets(self.targets)
             self._decloak.decloak_hidden(
@@ -140,7 +149,8 @@ class Scanner:
             self.tracker.set_discovered_targets(self.discovered)
             self.tracker.refresh()
 
-            if scan_limit and time.time() - start >= scan_limit:
+            # scan_elapsed already excludes pause time
+            if scan_limit and self.tracker.scan_elapsed >= scan_limit:
                 break
             if self._found_specific_target():
                 break
@@ -150,13 +160,13 @@ class Scanner:
 
     def _filter(self, targets: list[AccessPoint]) -> list[AccessPoint]:
         cracked = (
-            self.store.get_cracked_bssids()
+            {b.upper() for b in self.store.get_cracked_bssids()}
             if self.cfg.scan.ignore_cracked
             else set()
         )
         result = []
         for ap in targets:
-            if ap.bssid in cracked:
+            if (ap.bssid or "").upper() in cracked:
                 continue
             if not self._passes_enc_filter(ap):
                 continue
@@ -185,9 +195,14 @@ class Scanner:
         from .models import EncryptionType, WPSState
         if s.filter_wep and ap.encryption == EncryptionType.WEP:
             return True
-        if s.filter_wpa and ap.encryption in (EncryptionType.WPA, EncryptionType.WPA2):
+        if s.filter_wpa and (
+            ap.encryption in (EncryptionType.WPA, EncryptionType.WPA2)
+            or ap.transition_mode
+        ):
             return True
-        if s.filter_wpa3 and ap.encryption == EncryptionType.WPA3:
+        if s.filter_wpa3 and (
+            ap.encryption == EncryptionType.WPA3 or ap.transition_mode
+        ):
             return True
         if s.filter_owe and ap.encryption == EncryptionType.OWE:
             return True
@@ -249,9 +264,11 @@ class Scanner:
             selected = selected[: self.cfg.attack.attack_max]
 
         for ap in selected:
+            # Same palette as the ATTACKING header (bold cyan ESSID, dim BSSID).
             print_info(
-                f"Selected: [cyan]{safe_markup(ap.display_name)}[/] "
-                f"[dim]({safe_markup(ap.bssid)})[/] ch{ap.channel}"
+                f"Selected: [bold cyan]{safe_markup(ap.display_name)}[/] "
+                f"[dim]({safe_markup((ap.bssid or '').upper())})[/] "
+                f"[cyan]ch{ap.channel}[/]"
             )
 
         return selected

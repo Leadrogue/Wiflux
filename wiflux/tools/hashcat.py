@@ -6,6 +6,7 @@ import json
 import os
 import re
 import select
+import signal
 import subprocess
 import tempfile
 import time
@@ -205,21 +206,148 @@ class _WordlistReader:
 
 PASS_TIMEOUT = 3600
 _benchmark_cache: dict[str, int] = {}
+_device_info_cache: list[dict] | None = None
+
+
+def list_hashcat_devices(*, refresh: bool = False) -> list[dict]:
+    """
+    Parse ``hashcat -I`` into device dicts:
+
+    ``{"id": "1", "type": "GPU"|"CPU"|..., "name": "..."}``
+    """
+    global _device_info_cache
+    if _device_info_cache is not None and not refresh:
+        return list(_device_info_cache)
+    if not which("hashcat"):
+        _device_info_cache = []
+        return []
+    stdout, _, code = run(["hashcat", "-I"], timeout=60)
+    devices: list[dict] = []
+    current_id: str | None = None
+    current_type = ""
+    current_name = ""
+    for line in (stdout or "").splitlines():
+        m_id = re.search(r"Backend Device ID\s*#\s*0*(\d+)", line, re.I)
+        if m_id:
+            if current_id is not None:
+                devices.append({
+                    "id": current_id,
+                    "type": (current_type or "Unknown").upper(),
+                    "name": current_name or f"Device {current_id}",
+                })
+            current_id = m_id.group(1)
+            current_type = ""
+            current_name = ""
+            continue
+        m_type = re.search(r"Type\.+:\s*(\w+)", line, re.I)
+        if m_type and current_id is not None:
+            current_type = m_type.group(1)
+            continue
+        m_name = re.search(r"Name\.+:\s*(.+)", line, re.I)
+        if m_name and current_id is not None:
+            current_name = m_name.group(1).strip()
+            continue
+    if current_id is not None:
+        devices.append({
+            "id": current_id,
+            "type": (current_type or "Unknown").upper(),
+            "name": current_name or f"Device {current_id}",
+        })
+    _device_info_cache = devices
+    return list(devices)
+
+
+def hashcat_backend_args(
+    *,
+    backend: str = "auto",
+    devices: str = "",
+    workload: int = 3,
+    force: bool = True,
+) -> tuple[list[str], str]:
+    """
+    Build hashcat device / workload CLI flags.
+
+    Returns ``(args, human_summary)`` e.g. ``(["-D", "2", "-w", "3"], "GPU only")``.
+    """
+    args: list[str] = []
+    summary = "default devices"
+    backend = (backend or "auto").strip().lower()
+    devices = (devices or "").strip()
+
+    infos = list_hashcat_devices()
+    gpu_ids = [d["id"] for d in infos if "GPU" in d.get("type", "")]
+    cpu_ids = [d["id"] for d in infos if "CPU" in d.get("type", "")]
+
+    if devices:
+        args.extend(["-d", devices])
+        summary = f"devices -d {devices}"
+    elif backend == "gpu":
+        # Prefer concrete GPU IDs from hashcat -I; else OpenCL type 2 = GPU.
+        if gpu_ids:
+            args.extend(["-d", ",".join(gpu_ids)])
+            names = ", ".join(d["name"] for d in infos if d["id"] in gpu_ids)
+            summary = f"GPU ({names or ','.join(gpu_ids)})"
+        else:
+            args.extend(["-D", "2"])
+            summary = "GPU only (-D 2; none listed by hashcat -I)"
+    elif backend == "cpu":
+        if cpu_ids:
+            args.extend(["-d", ",".join(cpu_ids)])
+            summary = f"CPU ({','.join(cpu_ids)})"
+        else:
+            args.extend(["-D", "1"])
+            summary = "CPU only (-D 1)"
+    elif backend == "all":
+        summary = "all devices"
+    else:
+        # auto: prefer GPU when present, else CPU
+        if gpu_ids:
+            args.extend(["-d", ",".join(gpu_ids)])
+            names = ", ".join(d["name"] for d in infos if d["id"] in gpu_ids)
+            summary = f"auto GPU ({names or ','.join(gpu_ids)})"
+        elif cpu_ids:
+            args.extend(["-d", ",".join(cpu_ids)])
+            summary = "auto CPU (no GPU detected)"
+        else:
+            summary = "auto (hashcat default devices)"
+
+    wl = workload if 1 <= int(workload or 0) <= 4 else 3
+    args.extend(["-w", str(wl)])
+    if force:
+        args.append("--force")
+    return args, summary
 
 
 class Hashcat:
     @staticmethod
-    def benchmark_wpa_speed(wpa3: bool = False) -> int:
+    def backend_args_from_cfg(cfg=None) -> tuple[list[str], str]:
+        """Resolve device flags from WifluxConfig.attack (or defaults)."""
+        backend = "auto"
+        devices = ""
+        workload = 3
+        force = True
+        if cfg is not None:
+            attack = getattr(cfg, "attack", cfg)
+            backend = getattr(attack, "hashcat_backend", "auto") or "auto"
+            devices = getattr(attack, "hashcat_devices", "") or ""
+            workload = int(getattr(attack, "hashcat_workload", 3) or 3)
+            force = bool(getattr(attack, "hashcat_force", True))
+        return hashcat_backend_args(
+            backend=backend, devices=devices, workload=workload, force=force,
+        )
+
+    @staticmethod
+    def benchmark_wpa_speed(wpa3: bool = False, cfg=None) -> int:
         """Return cached WPA hash rate (H/s) from hashcat -b, or 0 if unavailable."""
         mode = "22001" if wpa3 else "22000"
-        if mode in _benchmark_cache:
-            return _benchmark_cache[mode]
+        backend_args, _ = Hashcat.backend_args_from_cfg(cfg)
+        cache_key = f"{mode}:{','.join(backend_args)}"
+        if cache_key in _benchmark_cache:
+            return _benchmark_cache[cache_key]
         if not which("hashcat"):
             return 0
-        stdout, _, code = run(
-            ["hashcat", "-b", "-m", mode, "--force"],
-            timeout=120,
-        )
+        cmd = ["hashcat", "-b", "-m", mode, *backend_args]
+        stdout, _, code = run(cmd, timeout=120)
         if code != 0:
             return 0
         speed = 0
@@ -239,7 +367,7 @@ class Hashcat:
             else:
                 speed = int(val)
             break
-        _benchmark_cache[mode] = speed
+        _benchmark_cache[cache_key] = speed
         return speed
 
     @staticmethod
@@ -251,25 +379,70 @@ class Hashcat:
         rules: str | None = None,
         on_progress: Optional[Callable[[CrackProgress], None]] = None,
         should_stop: Optional[Callable[[], bool]] = None,
+        session: str | None = None,
+        restore: bool = False,
+        restore_file_path: str | None = None,
+        hash_file: str | None = None,
+        potfile_path: str | None = None,
+        keep_hash_file: bool = False,
+        cfg=None,
+        backend_args: list[str] | None = None,
     ) -> str | None:
         if not which("hashcat") or not wordlist or not os.path.isfile(wordlist):
             return None
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".22000", delete=False) as f:
-            f.write(hash_line + "\n")
-            hash_file = f.name
+        owns_hash_file = False
+        if hash_file:
+            # Ensure durable hash file has current line when provided.
+            try:
+                with open(hash_file, "w", encoding="utf-8") as fh:
+                    fh.write(hash_line.strip() + "\n")
+            except OSError:
+                return None
+        else:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".22000", delete=False) as f:
+                f.write(hash_line.strip() + "\n")
+                hash_file = f.name
+            owns_hash_file = True
 
         reader: _WordlistReader | None = None
         proc: subprocess.Popen | None = None
         try:
             mode = "22001" if wpa3 else "22000"
-            cmd = [
-                "hashcat", "-m", mode, hash_file, wordlist,
-                "--force", "-w", "3",
-                "--status", "--status-json", "--status-timer=1",
-            ]
-            if rules and os.path.isfile(rules):
-                cmd.extend(["-r", rules])
+            if backend_args is None:
+                backend_args, _ = Hashcat.backend_args_from_cfg(cfg)
+            use_restore = bool(
+                restore
+                and session
+                and restore_file_path
+                and os.path.isfile(restore_file_path)
+                and os.path.getsize(restore_file_path) > 0
+            )
+            if use_restore:
+                # Restore mode reloads attack state from the restore file.
+                cmd = [
+                    "hashcat",
+                    "--session", session,
+                    "--restore",
+                    "--restore-file-path", restore_file_path,
+                    *backend_args,
+                    "--status", "--status-json", "--status-timer=1",
+                ]
+            else:
+                cmd = [
+                    "hashcat", "-m", mode, hash_file, wordlist,
+                    *backend_args,
+                    "--status", "--status-json", "--status-timer=1",
+                ]
+                if session:
+                    cmd.extend(["--session", session])
+                if restore_file_path:
+                    cmd.extend(["--restore-file-path", restore_file_path])
+                if rules and os.path.isfile(rules):
+                    cmd.extend(["-r", rules])
+            if potfile_path:
+                cmd.extend(["--potfile-path", potfile_path])
+
             popen_kwargs: dict = {"stdout": subprocess.PIPE, "stderr": subprocess.STDOUT}
             if on_progress:
                 popen_kwargs.update(text=True, encoding="utf-8", errors="replace", bufsize=1)
@@ -278,89 +451,117 @@ class Hashcat:
                 popen_kwargs["stderr"] = subprocess.DEVNULL
 
             proc = subprocess.Popen(cmd, **popen_kwargs)
-            hc_proc = _HashcatProcess(proc)
+            # Prefer SIGINT so hashcat writes a restore checkpoint before exit.
+            hc_proc = _HashcatProcess(proc, graceful_interrupt=bool(session or restore_file_path))
             ProcessPool().register(hc_proc)
+            deadline = time.time() + PASS_TIMEOUT
 
-            if on_progress:
-                reader = _WordlistReader(wordlist)
-                wl_name = os.path.basename(wordlist)
-                last_candidate_at = 0.0
+            try:
+                if on_progress:
+                    reader = _WordlistReader(wordlist)
+                    wl_name = os.path.basename(wordlist)
+                    last_candidate_at = 0.0
 
-                on_progress(CrackProgress(wordlist=wl_name, candidate="starting..."))
+                    on_progress(CrackProgress(wordlist=wl_name, candidate="starting..."))
 
-                def emit(data: dict) -> None:
-                    nonlocal last_candidate_at
-                    prog = data.get("progress") or [0, 0]
-                    current, total = int(prog[0]), int(prog[1])
-                    percent = (current / total * 100.0) if total else 0.0
-                    speed = 0
-                    devices = data.get("devices") or []
-                    if devices:
-                        speed = int(devices[0].get("speed") or 0)
+                    def emit(data: dict) -> None:
+                        nonlocal last_candidate_at
+                        prog = data.get("progress") or [0, 0]
+                        current, total = int(prog[0]), int(prog[1])
+                        percent = (current / total * 100.0) if total else 0.0
+                        speed = 0
+                        devices = data.get("devices") or []
+                        if devices:
+                            speed = int(devices[0].get("speed") or 0)
 
-                    eta = 0
-                    est_stop = int(data.get("estimated_stop") or 0)
-                    if est_stop:
-                        eta = max(0, est_stop - int(time.time()))
-                    elif total > current and speed > 0:
-                        eta = int((total - current) / speed)
+                        eta = 0
+                        est_stop = int(data.get("estimated_stop") or 0)
+                        if est_stop:
+                            eta = max(0, est_stop - int(time.time()))
+                        elif total > current and speed > 0:
+                            eta = int((total - current) / speed)
 
-                    candidate = ""
-                    now = time.time()
-                    if now - last_candidate_at >= 1.0:
-                        # With -r rules, restore_point is a global candidate index
-                        # (wordlist × rules), not a wordlist line — do not seek.
-                        if rules:
-                            candidate = os.path.basename(rules)
-                        else:
-                            pos = int(data.get("restore_point") or current or 0)
-                            if pos < 500_000:
-                                candidate = reader.get_line(pos)[:40]
-                        last_candidate_at = now
+                        candidate = ""
+                        now = time.time()
+                        if now - last_candidate_at >= 1.0:
+                            # With -r rules, restore_point is a global candidate index
+                            # (wordlist × rules), not a wordlist line — do not seek.
+                            if rules:
+                                candidate = os.path.basename(rules)
+                            else:
+                                pos = int(data.get("restore_point") or current or 0)
+                                if pos < 500_000:
+                                    candidate = reader.get_line(pos)[:40]
+                            last_candidate_at = now
 
-                    on_progress(CrackProgress(
-                        current=current,
-                        total=total,
-                        percent=percent,
-                        speed=speed,
-                        eta_seconds=eta,
-                        candidate=candidate,
-                        wordlist=wl_name,
-                    ))
+                        on_progress(CrackProgress(
+                            current=current,
+                            total=total,
+                            percent=percent,
+                            speed=speed,
+                            eta_seconds=eta,
+                            candidate=candidate,
+                            wordlist=wl_name,
+                        ))
 
-                if proc.stdout:
-                    while proc.poll() is None:
-                        if should_stop and should_stop():
-                            _HashcatProcess(proc).kill()
-                            return None
-                        ready, _, _ = select.select([proc.stdout], [], [], 0.5)
-                        if not ready:
-                            continue
-                        line = proc.stdout.readline()
-                        if not line:
-                            break
-                        match = re.search(r"\{.*\}", line)
-                        if not match:
-                            continue
-                        try:
-                            emit(json.loads(match.group()))
-                        except json.JSONDecodeError:
-                            continue
+                    if proc.stdout:
+                        while proc.poll() is None:
+                            if time.time() >= deadline:
+                                hc_proc.kill()
+                                break
+                            if should_stop and should_stop():
+                                hc_proc.kill()
+                                return None
+                            ready, _, _ = select.select([proc.stdout], [], [], 0.5)
+                            if not ready:
+                                continue
+                            line = proc.stdout.readline()
+                            if not line:
+                                break
+                            match = re.search(r"\{.*\}", line)
+                            if not match:
+                                continue
+                            try:
+                                emit(json.loads(match.group()))
+                            except json.JSONDecodeError:
+                                continue
 
-            proc.wait(timeout=PASS_TIMEOUT)
-            return Hashcat._read_cracked_key(mode, hash_file)
+                if proc.poll() is None:
+                    remaining = max(1.0, deadline - time.time())
+                    try:
+                        proc.wait(timeout=remaining)
+                    except subprocess.TimeoutExpired:
+                        hc_proc.kill()
+                return Hashcat._read_cracked_key(mode, hash_file, potfile_path=potfile_path)
+            finally:
+                ProcessPool().unregister(hc_proc)
         except subprocess.TimeoutExpired:
             if proc:
-                _HashcatProcess(proc).kill()
+                wrapper = _HashcatProcess(
+                    proc, graceful_interrupt=bool(session or restore_file_path),
+                )
+                wrapper.kill()
             return None
         finally:
             if reader:
                 reader.close()
-            os.unlink(hash_file)
+            if owns_hash_file and hash_file and not keep_hash_file:
+                try:
+                    os.unlink(hash_file)
+                except OSError:
+                    pass
 
     @staticmethod
-    def _read_cracked_key(mode: str, hash_file: str) -> str | None:
-        stdout, _, _ = run(["hashcat", "-m", mode, hash_file, "--show"])
+    def _read_cracked_key(
+        mode: str,
+        hash_file: str,
+        *,
+        potfile_path: str | None = None,
+    ) -> str | None:
+        cmd = ["hashcat", "-m", mode, hash_file, "--show"]
+        if potfile_path:
+            cmd.extend(["--potfile-path", potfile_path])
+        stdout, _, _ = run(cmd)
         for line in stdout.splitlines():
             if not line or line.startswith("#"):
                 continue
@@ -435,17 +636,26 @@ class Hashcat:
 class _HashcatProcess:
     """Thin wrapper so ProcessPool can terminate hashcat."""
 
-    def __init__(self, proc: subprocess.Popen):
+    def __init__(self, proc: subprocess.Popen, *, graceful_interrupt: bool = False):
         self.proc = proc
+        self.graceful_interrupt = graceful_interrupt
 
     def running(self) -> bool:
         return self.proc.poll() is None
 
     def kill(self) -> None:
         if self.running():
-            self.proc.terminate()
-            try:
-                self.proc.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                self.proc.kill()
+            # SIGINT makes hashcat write a restore checkpoint (Ctrl+C path).
+            if self.graceful_interrupt:
+                try:
+                    self.proc.send_signal(signal.SIGINT)
+                    self.proc.wait(timeout=5)
+                except Exception:
+                    pass
+            if self.running():
+                self.proc.terminate()
+                try:
+                    self.proc.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    self.proc.kill()
         ProcessPool().unregister(self)

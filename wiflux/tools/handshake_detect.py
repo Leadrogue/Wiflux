@@ -210,11 +210,11 @@ def validate_handshake_capture(
     else:
         detail = "Hash extractable — EAPOL 4-way incomplete but may still crack"
 
-    key_type = hash_key_type(hash_line)
-    if prefer_wpa2 and key_type == "wpa2":
-        detail += " — WPA2 downgrade path"
-    elif prefer_wpa2 and key_type == "wpa3":
-        detail += " — WPA3/SAE only (downgrade missed)"
+    key_type = hash_key_type(hash_line)  # pmkid | eapol | unknown
+    if prefer_wpa2 and key_type == "eapol":
+        detail += " — EAPOL 4-way (transition preferred path)"
+    elif prefer_wpa2 and key_type == "pmkid":
+        detail += " — PMKID only (no EAPOL 4-way in capture)"
 
     if essid:
         detail += f" ({essid})"
@@ -253,10 +253,11 @@ def list_hash_bssids(capfile: str) -> list[tuple[str, str]]:
                 if len(parts) < 4:
                     continue
                 bssid = _bssid_display(parts[3])
-                key = _bssid_norm(bssid)
-                if key in seen:
+                # Keep PMKID and EAPOL (and any other variants) for the same BSSID.
+                dedupe = line.casefold()
+                if dedupe in seen:
                     continue
-                seen.add(key)
+                seen.add(dedupe)
                 out.append((bssid, line))
         return out
     except (subprocess.TimeoutExpired, OSError):

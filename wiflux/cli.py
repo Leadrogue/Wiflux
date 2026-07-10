@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from pathlib import Path
 
 from . import __version__
 from .config import WifluxConfig, find_wordlist
@@ -207,15 +208,15 @@ Utilities:
 
     g = p.add_argument_group("Scan", "Bands, channels, and target selection")
     g.add_argument("-c", "--channel", dest="channels", metavar="CH",
-                   help="Comma-separated channels (e.g. ch1,ch6 or ch36-ch48)")
-    g.add_argument("-2", "--2ghz", action="store_true", default=True,
-                   help="Include 2.4GHz band (default: on)")
+                   help="Channels: 1,6,11 or ch36,ch40 or 36-48 (optional ch prefix)")
+    g.add_argument("-2", "--2ghz", action="store_true", default=False,
+                   help="Include 2.4GHz (default alone; with -5/--6ghz pass -2 to also scan 2.4)")
     g.add_argument("-5", "--5ghz", action="store_true",
-                   help="Include 5GHz band")
+                   help="Scan 5GHz (alone = 5GHz only; add -2 for dual-band)")
     g.add_argument("--6ghz", action="store_true",
-                   help="Include 6GHz band (Wi-Fi 6E)")
+                   help="Scan 6GHz Wi-Fi 6E (alone = 6GHz only; add -2/-5 to combine)")
     g.add_argument("-p", "--pillage", dest="scan_time", type=int, default=0, metavar="SEC",
-                   help="Auto-attack after SEC seconds of scanning")
+                   help="Stop scanning after SEC seconds (use --auto to attack without prompts)")
     g.add_argument("-b", "--bssid", metavar="MAC",
                    help="Target a single BSSID")
     g.add_argument("-e", "--essid", metavar="NAME",
@@ -225,7 +226,7 @@ Utilities:
 
     g = p.add_argument_group("Scan filters", "Narrow the target list")
     g.add_argument("--min-power", type=int, default=0, metavar="DBM",
-                   help="Minimum signal strength (dBm)")
+                   help="Minimum signal (use --min-power=-70 for dBm, or 0-100 scale)")
     g.add_argument("--clients-only", action="store_true",
                    help="Only APs with associated clients")
     g.add_argument("--nodecloak", action="store_true",
@@ -321,6 +322,23 @@ Utilities:
                    help="Use smart wordlist immediately")
     g.add_argument("--smart-wordlist-size", type=int, default=0, metavar="N",
                    help="Smart wordlist size (default: prompt, max 100000)")
+    g.add_argument("--no-crack-checkpoint", action="store_true",
+                   help="Disable durable hashcat crack checkpoints")
+    g.add_argument("--yes-resume-crack", action="store_true",
+                   help="Auto-resume an existing crack checkpoint without prompting")
+    g.add_argument("--gpu", action="store_true",
+                   help="Use GPU only for hashcat (OpenCL/CUDA/HIP)")
+    g.add_argument("--cpu-only", action="store_true",
+                   help="Force hashcat to use CPU only")
+    g.add_argument("--hashcat-backend", choices=["auto", "gpu", "cpu", "all"],
+                   default=None, metavar="MODE",
+                   help="Hashcat devices: auto (GPU if present), gpu, cpu, all")
+    g.add_argument("--hashcat-devices", default="", metavar="IDS",
+                   help="Hashcat -d device IDs (e.g. 1 or 1,2); see hashcat -I")
+    g.add_argument("--hashcat-workload", type=int, default=0, metavar="N",
+                   help="Hashcat -w workload 1-4 (default: 3)")
+    g.add_argument("--no-hashcat-force", action="store_true",
+                   help="Do not pass --force to hashcat")
 
     g = p.add_argument_group("Timeouts", "Per-attack time limits in seconds")
     g.add_argument("--wpa-timeout", type=int, default=300, metavar="SEC",
@@ -373,17 +391,25 @@ def args_to_config(args: argparse.Namespace) -> WifluxConfig:
         cfg.scan.interface = args.interface
     if args.channels is not None:
         cfg.scan.channels = args.channels
-    cfg.scan.band_5ghz = bool(args.__dict__.get("5ghz", False))
-    cfg.scan.band_6ghz = bool(args.__dict__.get("6ghz", False))
-    has_high_band = cfg.scan.band_5ghz or cfg.scan.band_6ghz
-    cfg.scan.band_2ghz = args.__dict__.get("2ghz", True) or not has_high_band
-    if cfg.scan.band_5ghz:
+    want_5 = bool(args.__dict__.get("5ghz", False))
+    want_6 = bool(args.__dict__.get("6ghz", False))
+    want_2 = bool(args.__dict__.get("2ghz", False))
+    if want_5 or want_6:
+        # High-band flags: exclusive unless -2 also given (no forced 2.4).
+        cfg.scan.band_2ghz = want_2
+        cfg.scan.band_5ghz = want_5
+        cfg.scan.band_6ghz = want_6
+    else:
         cfg.scan.band_2ghz = True
-        cfg.scan.band_5ghz = True
-    if cfg.scan.band_6ghz:
-        cfg.scan.band_2ghz = True
+        cfg.scan.band_5ghz = False
+        cfg.scan.band_6ghz = False
     cfg.scan.scan_time = args.scan_time
-    cfg.scan.min_power = args.min_power
+    # Accept dBm (negative) or 0–100 airodump-style power.
+    mp = args.min_power
+    if mp < 0:
+        cfg.scan.min_power = 0 if mp == -1 else mp + 100
+    else:
+        cfg.scan.min_power = mp
     cfg.scan.clients_only = args.clients_only
     if args.bssid is not None:
         cfg.scan.target_bssid = args.bssid
@@ -433,7 +459,10 @@ def args_to_config(args: argparse.Namespace) -> WifluxConfig:
     cfg.attack.deauth_combo = args.deauth_combo
     cfg.attack.deauth_rotate = not args.no_deauth_rotate
     cfg.attack.skip_crack = args.skip_crack
-    cfg.attack.wordlist = find_wordlist(args.wordlist)
+    if args.wordlist:
+        cfg.attack.wordlist = find_wordlist(args.wordlist)
+    elif not args.config or not cfg.attack.wordlist:
+        cfg.attack.wordlist = find_wordlist()
     if args.capture_health:
         cfg.attack.capture_health = True
     elif args.no_capture_health:
@@ -447,21 +476,47 @@ def args_to_config(args: argparse.Namespace) -> WifluxConfig:
     if args.smart_wordlist_size > 0:
         from .tools.smart_wordlist import clamp_wordlist_size
         cfg.attack.smart_wordlist_size = clamp_wordlist_size(args.smart_wordlist_size)
+    cfg.attack.crack_checkpoints = not args.no_crack_checkpoint
+    cfg.attack.yes_resume_crack = args.yes_resume_crack
+    if args.gpu and args.cpu_only:
+        print_error("Use only one of --gpu or --cpu-only")
+        sys.exit(2)
+    if args.hashcat_backend:
+        cfg.attack.hashcat_backend = args.hashcat_backend
+    elif args.gpu:
+        cfg.attack.hashcat_backend = "gpu"
+    elif args.cpu_only:
+        cfg.attack.hashcat_backend = "cpu"
+    # else keep default "auto"
+    if args.hashcat_devices:
+        cfg.attack.hashcat_devices = args.hashcat_devices.strip()
+    if args.hashcat_workload and 1 <= args.hashcat_workload <= 4:
+        cfg.attack.hashcat_workload = args.hashcat_workload
+    cfg.attack.hashcat_force = not args.no_hashcat_force
     cfg.attack.attack_max = args.attack_max
     cfg.attack.use_bully = args.bully
     cfg.attack.wpa_timeout = args.wpa_timeout
     cfg.attack.pmkid_timeout = args.pmkid_timeout
     cfg.attack.wps_timeout = args.wps_timeout
-    cfg.output.data_dir = args.data_dir
+    # Preserve --config data_dir unless CLI explicitly overrides the default path.
+    if not args.config or args.data_dir != "wiflux-data":
+        cfg.output.data_dir = args.data_dir
     cfg.output.verbose = args.verbose
     cfg.output.quiet = args.quiet
     cfg.output.json_output = args.json
 
-    cfg.auto_mode = args.auto or args.scan_time > 0
+    # --auto is non-interactive; -p only times the scan (still prompts unless --auto).
+    cfg.auto_mode = bool(args.auto)
     cfg.kill_conflicting = args.kill
     cfg.random_mac = args.random_mac
     cfg.restore_managed = args.restore
     cfg.infinite = args.infinite
+
+    # Normalize paths after possible config + CLI merges.
+    cfg.output.data_dir = str(Path(cfg.output.data_dir).resolve())
+    cfg.output.handshake_dir = str(Path(cfg.output.handshake_dir).resolve())
+    Path(cfg.output.data_dir).mkdir(parents=True, exist_ok=True)
+    Path(cfg.output.handshake_dir).mkdir(parents=True, exist_ok=True)
 
     return cfg
 
@@ -490,6 +545,20 @@ def setup_interface(cfg: WifluxConfig) -> str:
     iface = cfg.scan.interface
     if not iface:
         iface = Airmon.ask()
+    if cfg.random_mac:
+        from .tools.interface import randomize_mac
+        # Randomize managed iface before monitor when possible.
+        base = iface
+        if not Airmon.is_monitor(iface):
+            new_mac = randomize_mac(iface)
+            if new_mac:
+                print_info(f"Randomized MAC on {iface} → [cyan]{new_mac}[/]")
+            else:
+                print_error(f"Could not randomize MAC on {iface}")
+        else:
+            new_mac = randomize_mac(iface)
+            if new_mac:
+                print_info(f"Randomized MAC on {iface} → [cyan]{new_mac}[/]")
     if Airmon.is_monitor(iface):
         print_info(f"Using {iface} (already in monitor mode)")
     else:
@@ -498,6 +567,11 @@ def setup_interface(cfg: WifluxConfig) -> str:
         if mon_iface != iface:
             print_info(f"Monitor interface: {mon_iface}")
         iface = mon_iface
+        if cfg.random_mac:
+            from .tools.interface import randomize_mac
+            new_mac = randomize_mac(iface)
+            if new_mac:
+                print_info(f"Randomized MAC on {iface} → [cyan]{new_mac}[/]")
     cfg.scan.interface = iface
     return iface
 
@@ -543,7 +617,8 @@ def main(argv: list[str] | None = None) -> int:
     if not command_mode and not cfg.output.quiet and not cfg.output.json_output:
         if supports_live() and not args.no_splash:
             show_splash(__version__)
-            run_startup_dependency_check()
+        # Always run the dependency screen after splash (or instead, if --no-splash).
+        run_startup_dependency_check()
         banner(__version__)
     elif command_mode:
         banner(__version__)

@@ -4,18 +4,18 @@ Pre-built downloads are published at:
 
 **https://github.com/Leadrogue/Wiflux/releases**
 
-Latest: **[v1.0.4](https://github.com/Leadrogue/Wiflux/releases/tag/v1.0.4)**
+Latest: **[v1.0.5](https://github.com/Leadrogue/Wiflux/releases/tag/v1.0.5)**
 
 ---
 
 ## Recommended: Linux installer bundle
 
-Download `wiflux-1.0.4-linux-installer.tar.gz`, then:
+Download `wiflux-1.0.5-linux-installer.tar.gz`, then:
 
 ```bash
-curl -LO https://github.com/Leadrogue/Wiflux/releases/download/v1.0.4/wiflux-1.0.4-linux-installer.tar.gz
-tar -xzf wiflux-1.0.4-linux-installer.tar.gz
-cd wiflux-1.0.4-linux-installer
+curl -LO https://github.com/Leadrogue/Wiflux/releases/download/v1.0.5/wiflux-1.0.5-linux-installer.tar.gz
+tar -xzf wiflux-1.0.5-linux-installer.tar.gz
+cd wiflux-1.0.5-linux-installer
 ./install.sh
 ```
 
@@ -26,13 +26,13 @@ The installer checks Python 3.10+, installs the bundled wheel, detects the versi
 ## Install from wheel (pip)
 
 ```bash
-pip install wiflux-1.0.4-py3-none-any.whl --break-system-packages
+pip install wiflux-1.0.5-py3-none-any.whl --break-system-packages
 ```
 
 Direct from GitHub:
 
 ```bash
-pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.4/wiflux-1.0.4-py3-none-any.whl --break-system-packages
+pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.5/wiflux-1.0.5-py3-none-any.whl --break-system-packages
 ```
 
 On Kali/Debian with system Python, `--break-system-packages` is required.
@@ -42,9 +42,9 @@ On Kali/Debian with system Python, `--break-system-packages` is required.
 ## Install from source tarball
 
 ```bash
-curl -LO https://github.com/Leadrogue/Wiflux/releases/download/v1.0.4/wiflux-1.0.4.tar.gz
-tar -xzf wiflux-1.0.4.tar.gz
-cd wiflux-1.0.4
+curl -LO https://github.com/Leadrogue/Wiflux/releases/download/v1.0.5/wiflux-1.0.5.tar.gz
+tar -xzf wiflux-1.0.5.tar.gz
+cd wiflux-1.0.5
 pip install . --break-system-packages
 ```
 
@@ -55,8 +55,8 @@ pip install . --break-system-packages
 Each release includes `wiflux-VERSION-checksums.sha256`:
 
 ```bash
-curl -LO https://github.com/Leadrogue/Wiflux/releases/download/v1.0.4/wiflux-1.0.4-checksums.sha256
-sha256sum -c wiflux-1.0.4-checksums.sha256
+curl -LO https://github.com/Leadrogue/Wiflux/releases/download/v1.0.5/wiflux-1.0.5-checksums.sha256
+sha256sum -c wiflux-1.0.5-checksums.sha256
 ```
 
 ---

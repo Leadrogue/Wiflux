@@ -17,30 +17,52 @@ from .models import AccessPoint, HandshakeCaptureInfo, PMKIDCaptureInfo, WPSStat
 
 # emoji=False: MAC addresses like 64:FD:96:CD:AF:EB contain :CD: which Rich renders as 💿
 console = (
-    Console(width=120, soft_wrap=True, emoji=False)
+    Console(width=120, soft_wrap=True, emoji=False, highlight=False)
     if not sys.stdout.isatty()
-    else Console(emoji=False)
+    else Console(emoji=False, highlight=False)
 )
 
 
 _MAC_RE = re.compile(r"([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})")
 
+# Shared styles so ESSID / BSSID look the same in Selected, ATTACKING, tables, logs.
+STYLE_ESSID = "bold cyan"
+STYLE_BSSID = "dim"
+STYLE_CHANNEL = "cyan"
+STYLE_ENC = "yellow"
+
 
 def neutralize_mac_text(value: str) -> str:
-    """Break Rich :XX: emoji codes inside MAC addresses (e.g. :CD: → 💿)."""
-    if not value or ":" not in value:
-        return value
+    """Break Rich :XX: emoji codes inside MAC addresses (e.g. :CD: → 💿).
+
+    Only needed when the string will pass through markup parsing. Prefer
+    text_bssid() / safe_text() for plain Text rendering.
+    """
+    if not value or not isinstance(value, str) or ":" not in value:
+        return value if isinstance(value, str) else str(value or "")
     return _MAC_RE.sub(lambda m: m.group(1).replace(":", ":\u200b"), value)
 
 
 def safe_markup(value: str) -> str:
     """Escape user-controlled text before embedding in Rich markup strings."""
-    return rich_escape(neutralize_mac_text(value))
+    return rich_escape(neutralize_mac_text(str(value or "")))
 
 
 def safe_text(value: str, style: str = "") -> Text:
     """Render user-controlled text without markup/emoji interpretation."""
-    return Text(neutralize_mac_text(value), style=style)
+    # No ZWSP injection here — Text() is not markup-parsed, and ZWSP can make
+    # dim/bold styles look patchy mid-MAC on some terminals.
+    return Text(str(value or ""), style=style)
+
+
+def text_essid(name: str, *, style: str = STYLE_ESSID) -> Text:
+    """Network name with consistent colour everywhere in the UI."""
+    return Text(str(name or ""), style=style)
+
+
+def text_bssid(bssid: str, *, style: str = STYLE_BSSID) -> Text:
+    """MAC/BSSID with one solid style (no mid-address colour flicker)."""
+    return Text((bssid or "").upper(), style=style)
 
 
 def supports_live() -> bool:
@@ -121,9 +143,11 @@ def show_pmkid_captured(ap: AccessPoint, info: PMKIDCaptureInfo) -> None:
 
     hash_name = os.path.basename(info.hash_file) if info.hash_file else "—"
     hash_label = {
-        "wpa2": "WPA2 (hashcat mode 22000)",
-        "wpa3": "WPA3 (hashcat mode 22001)",
-    }.get(info.hash_type, "hashcat 22000/22001")
+        "eapol": "EAPOL 4-way (hashcat 22000)",
+        "pmkid": "PMKID (hashcat 22000)",
+        "wpa2": "EAPOL 4-way (hashcat 22000)",  # legacy labels
+        "wpa3": "PMKID (hashcat 22000)",
+    }.get(info.hash_type, "hashcat 22000")
 
     lines = [
         "[bold bright_cyan]✓  PMKID CAPTURED[/]",
@@ -155,9 +179,11 @@ def show_pmkid_captured_banner(ap: AccessPoint, info: PMKIDCaptureInfo) -> None:
     channel = info.channel or ap.channel
     hash_name = os.path.basename(info.hash_file) if info.hash_file else "—"
     hash_label = {
-        "wpa2": "WPA2 / mode 22000",
-        "wpa3": "WPA3 / mode 22001",
-    }.get(info.hash_type, "22000/22001")
+        "eapol": "EAPOL / mode 22000",
+        "pmkid": "PMKID / mode 22000",
+        "wpa2": "EAPOL / mode 22000",
+        "wpa3": "PMKID / mode 22000",
+    }.get(info.hash_type, "mode 22000")
 
     lines = [
         "[bold bright_cyan]◆  PMKID RECOVERED[/]",
@@ -270,9 +296,10 @@ def build_scan_table(
     if show_index:
         table.add_column("#", style="dim", width=4, justify="right")
     table.add_column("ESSID", min_width=20, max_width=28, no_wrap=True, overflow="ellipsis")
-    table.add_column("BSSID", style="dim", no_wrap=True)
-    table.add_column("CH", justify="center", width=4)
-    table.add_column("ENC", width=8)
+    table.add_column("BSSID", style=STYLE_BSSID, no_wrap=True)
+    table.add_column("GHz", justify="center", width=4, style=STYLE_CHANNEL)
+    table.add_column("CH", justify="center", width=4, style=STYLE_CHANNEL)
+    table.add_column("ENC", width=8, style=STYLE_ENC)
     table.add_column("PWR", justify="right", width=6)
     table.add_column("WPS", width=5)
     table.add_column("CL", justify="center", width=3)
@@ -283,13 +310,16 @@ def build_scan_table(
         name = ap.display_name
         if ap.decloaked:
             name += "*"
-        style = "cyan" if ap.essid_known else "yellow"
+        # Known ESSIDs use shared cyan; hidden stay yellow for visibility.
+        essid_style = STYLE_ESSID if ap.essid_known else "yellow"
+        ghz = {"2": "2.4", "5": "5", "6": "6"}.get(ap.radio_band, "?")
         row = []
         if show_index:
             row.append(str(i))
         row.extend([
-            safe_text(name, style=style),
-            safe_text(ap.bssid, style="dim"),
+            safe_text(name, style=essid_style),
+            text_bssid(ap.bssid),
+            ghz,
             str(ap.channel),
             ap.encryption_label,
             f"[{_power_style(ap.power)}]{ap.power}[/]",

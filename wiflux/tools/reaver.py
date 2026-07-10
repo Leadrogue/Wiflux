@@ -116,7 +116,9 @@ class WPSAttack:
         if not which("reaver"):
             return None, None
 
-        iface = recover_interface(cfg.scan.interface, ap.channel)
+        iface = recover_interface(
+            cfg.scan.interface, ap.channel, band=ap.radio_band,
+        )
         cmd = ["reaver", "-i", iface, "-b", ap.bssid, "-c", str(ap.channel), "-f", "-vv"]
         if pixie:
             cmd.append("-K")
@@ -141,7 +143,9 @@ class WPSAttack:
         if not which("bully"):
             return None, None
 
-        iface = recover_interface(cfg.scan.interface, ap.channel)
+        iface = recover_interface(
+            cfg.scan.interface, ap.channel, band=ap.radio_band,
+        )
         cmd = ["bully", "-b", ap.bssid, "-c", str(ap.channel), "-v", "3"]
         if pixie:
             cmd.append("-d")

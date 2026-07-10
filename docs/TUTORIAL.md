@@ -51,6 +51,16 @@ Skip the splash on future runs:
 sudo wiflux --no-splash
 ```
 
+### Dependency check
+
+After the welcome screen (or immediately with `--no-splash`), Wiflux shows a **dependency check** panel:
+
+1. Verifies aircrack-ng tools, hashcat, hcx tools, reaver/wash, etc.
+2. Checks for **`/usr/share/wordlists/rockyou.txt`**
+3. If only **`rockyou.txt.gz`** is present, **unpacks it automatically** (needs sudo write access)
+
+Press **Space** when the check finishes. Missing packages can be installed via apt when offered.
+
 ---
 
 ## 3. Scanning for targets
@@ -65,6 +75,8 @@ Once scanning begins, Wiflux:
 ### While waiting for results
 
 Before the first access points appear, you'll see a **Searching** panel with a pulsing indicator. This is normal — Wi-Fi scanning takes a few seconds.
+
+**Space** pauses the live scan (freezes the table so you can select/copy text) and **Space** again resumes. The status line shows `Space pause` / `Space resume`. Pause time does not count toward `-p` / `--pillage` scan limits.
 
 ### Scan options
 
@@ -97,6 +109,30 @@ sudo wiflux --wps
 sudo wiflux --auto -p 30
 ```
 
+`-p` alone only **times** the scan; you still pick targets interactively unless you also pass `--auto`.
+
+### Band selection (v1.0.5+)
+
+```bash
+sudo wiflux --5ghz          # 5 GHz only
+sudo wiflux --6ghz          # 6 GHz only
+sudo wiflux --5ghz -2       # 2.4 + 5 GHz
+sudo wiflux -c 1,6,11       # fixed channels (ch prefix optional: ch36,ch40)
+```
+
+### Hashcat GPU / CPU (v1.0.5+)
+
+By default Wiflux **auto-prefers a GPU** when `hashcat -I` lists one; otherwise CPU.
+
+```bash
+sudo wiflux --gpu                 # GPU only
+sudo wiflux --cpu-only            # CPU only
+hashcat -I                        # list device IDs
+sudo wiflux --hashcat-devices 1   # pin device(s)
+```
+
+> **Credit:** [Murlocdouche](https://github.com/Murlocdouche) reported that hashcat could not be directed to use the GPU; device selection was added in 1.0.5.
+
 ---
 
 ## 4. Understanding the live table
@@ -108,12 +144,15 @@ The scan view is a live-updating Rich table. Key columns:
 | **#** | Row number for target selection |
 | **ESSID** | Network name (`<hidden>` if not yet decloaked) |
 | **BSSID** | Access point MAC address |
+| **GHz** | Band: `2.4`, `5`, or `6` (same cyan style as CH) |
 | **CH** | Channel |
-| **PWR** | Signal strength (higher is better; closer to 0 dBm) |
-| **ENC** | Encryption: WEP, WPA, WPA2, WPA3, OWE |
+| **PWR** | Signal strength (higher is better on the 0–100 airodump scale) |
+| **ENC** | Encryption: WEP, WPA, WPA2, WPA3, OWE, WPA2/3-T (transition) |
 | **WPS** | `yes` / `no` / `lock` / `n/a` |
-| **CLI** | Number of associated clients |
+| **CL** | Number of associated clients |
 | **SCORE** | Attack priority score (higher = more promising) |
+
+> **Credit:** The **GHz** column was suggested by [Murlocdouche](https://github.com/Murlocdouche).
 
 ### SCORE explained
 

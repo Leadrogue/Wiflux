@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
@@ -99,14 +100,31 @@ class Attack(ABC):
 
         path, count = built
         self.tracker.log(
-            f"[cyan]hashcat[/] pass 1/2: ESSID-smart wordlist "
-            f"([yellow]{count:,}[/] passwords)",
+            f"[cyan]hashcat[/] ESSID-smart wordlist "
+            f"([yellow]{count:,}[/] passwords) — first crack stage",
             tag=self.name,
         )
         self.tracker.refresh()
         return path, path, f"smart:{count}"
 
-    def crack_hashcat(self, hash_line: str, started: float) -> str | None:
+    def crack_hashcat(
+        self,
+        hash_line: str,
+        started: float,
+        *,
+        method: str = "crack",
+        capture_file: str = "",
+    ) -> str | None:
+        from ..input import prompt_resume_crack
+        from ..tools.crack_checkpoint import (
+            create_checkpoint,
+            delete_checkpoint,
+            load_checkpoint,
+            mark_stage_done,
+            mark_stage_running,
+            save_checkpoint,
+            update_stage_progress,
+        )
         from ..tools.crack_ladder import (
             build_crack_stages,
             enrich_stage_etas,
@@ -114,31 +132,138 @@ class Attack(ABC):
         )
         from ..tools.hashcat import CrackProgress, Hashcat
 
-        wordlist, temp_path, wl_label = self._resolve_crack_wordlist()
-        if not wordlist:
-            return None
+        use_ckpt = bool(getattr(self.cfg.attack, "crack_checkpoints", True))
+        data_dir = self.cfg.output.data_dir
+        wpa3 = self.ap.crack_use_wpa3
+        cleanup: list[str] = []
+        checkpoint = None
+        resume = False
+        start_idx = 0
 
-        stages, cleanup = build_crack_stages(
-            self.ap, self.cfg, wordlist, wl_label, temp_path,
-        )
-        speed = Hashcat.benchmark_wpa_speed(self.ap.crack_use_wpa3)
+        if use_ckpt:
+            existing = load_checkpoint(data_dir, self.ap.bssid)
+            if existing and existing.is_resumable():
+                resume = prompt_resume_crack(
+                    self.cfg,
+                    existing,
+                    self.tracker,
+                )
+                if resume:
+                    checkpoint = existing
+                    hash_line = existing.hash_line
+                    # Password wordlists always use mode 22000 (never PMK 22001),
+                    # even if an older checkpoint stored wpa3=True.
+                    wpa3 = False
+                    existing.wpa3 = False
+                    start_idx = max(0, existing.stage_index)
+                    stages = [s.to_crack_stage() for s in existing.stages]
+                    self.tracker.log(
+                        f"[green]Resuming crack checkpoint[/] — "
+                        f"stage {start_idx + 1}/{len(stages)}",
+                        tag="hashcat",
+                    )
+                else:
+                    delete_checkpoint(data_dir, self.ap.bssid)
+                    self.tracker.log(
+                        "[yellow]Crack checkpoint discarded[/] — starting fresh",
+                        tag="hashcat",
+                    )
+
+        if checkpoint is None:
+            wordlist, temp_path, wl_label = self._resolve_crack_wordlist()
+            if not wordlist:
+                return None
+
+            stages, cleanup = build_crack_stages(
+                self.ap, self.cfg, wordlist, wl_label, temp_path,
+            )
+            if use_ckpt:
+                checkpoint = create_checkpoint(
+                    self.ap,
+                    data_dir,
+                    hash_line,
+                    stages,
+                    method=method,
+                    capture_file=capture_file,
+                    wpa3=wpa3,
+                )
+                stages = [s.to_crack_stage() for s in checkpoint.stages]
+                # Temp smart/vendor lists are copied into the job dir; safe to remove.
+                for path in cleanup:
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+                cleanup = []
+
+        backend_args, backend_summary = Hashcat.backend_args_from_cfg(self.cfg)
+        speed = Hashcat.benchmark_wpa_speed(wpa3, cfg=self.cfg)
         enrich_stage_etas(stages, speed)
         for line in format_crack_plan(stages, speed=speed):
             self.tracker.log(line, tag="hashcat")
+        self.tracker.log(
+            f"[cyan]hashcat[/] backend: [yellow]{backend_summary}[/]",
+            tag="hashcat",
+        )
+        if use_ckpt and checkpoint:
+            self.tracker.log(
+                "[dim]Checkpoints enabled — progress survives restart "
+                f"({data_dir}/crack_checkpoints/)[/]",
+                tag="hashcat",
+            )
         self.tracker.refresh()
 
+        last_progress_save = 0.0
+
         try:
-            for idx, stage in enumerate(stages, start=1):
+            for idx in range(start_idx, len(stages)):
+                stage = stages[idx]
                 wl_path, detail, rules = stage.wordlist, stage.label, stage.rules
                 if self.should_stop():
+                    if checkpoint:
+                        save_checkpoint(checkpoint)
+                        self.tracker.log(
+                            "[yellow]Crack paused[/] — checkpoint saved for resume",
+                            tag="hashcat",
+                        )
                     return None
                 self.tracker.clear_skip_pass()
-                label = f"pass {idx}/{len(stages)}: {detail}"
+                label = f"pass {idx + 1}/{len(stages)}: {detail}"
+                if resume and idx == start_idx:
+                    label += " [restore]"
                 self.tracker.log(f"[cyan]hashcat[/] {label}", tag=self.name)
                 self.status("crack", label, started=started, wordlist=detail)
                 self.tracker.refresh()
 
-                def on_progress(progress: CrackProgress, _detail=detail) -> None:
+                session = None
+                restore_path = None
+                hash_file = None
+                potfile = None
+                do_restore = False
+                if checkpoint and idx < len(checkpoint.stages):
+                    mark_stage_running(checkpoint, idx)
+                    sc = checkpoint.stages[idx]
+                    session = sc.session
+                    restore_path = sc.restore_path
+                    hash_file = checkpoint.hash_file
+                    potfile = checkpoint.potfile
+                    do_restore = (
+                        os.path.isfile(restore_path)
+                        and os.path.getsize(restore_path) > 0
+                    )
+                    if do_restore:
+                        self.tracker.log(
+                            f"[cyan]hashcat[/] restoring session "
+                            f"[dim]{session}[/]",
+                            tag=self.name,
+                        )
+
+                def on_progress(
+                    progress: CrackProgress,
+                    _detail=detail,
+                    _idx=idx,
+                ) -> None:
+                    nonlocal last_progress_save
                     self.status(
                         "crack",
                         f"{_detail} — {Hashcat.format_progress(progress)}",
@@ -151,30 +276,68 @@ class Attack(ABC):
                         words_total=progress.total,
                         wordlist=_detail,
                     )
+                    if checkpoint:
+                        now = time.time()
+                        # Persist progress every ~5s so restarts show last %.
+                        if now - last_progress_save >= 5.0:
+                            last_progress_save = now
+                            update_stage_progress(
+                                checkpoint,
+                                _idx,
+                                progress_pct=progress.percent,
+                                words_done=progress.current,
+                                words_total=progress.total,
+                            )
 
                 key = Hashcat.crack_hash(
                     hash_line,
                     wl_path,
-                    self.ap.crack_use_wpa3,
+                    wpa3,
                     rules=rules,
                     on_progress=on_progress,
                     should_stop=self.tracker.skip_pass_requested,
+                    session=session,
+                    restore=do_restore,
+                    restore_file_path=restore_path,
+                    hash_file=hash_file,
+                    potfile_path=potfile,
+                    keep_hash_file=bool(hash_file),
+                    cfg=self.cfg,
+                    backend_args=backend_args,
                 )
                 if key:
+                    if checkpoint:
+                        mark_stage_done(checkpoint, idx, "cracked")
+                        delete_checkpoint(data_dir, self.ap.bssid)
                     return key
                 if self.tracker.skip_pass_requested():
                     self.tracker.clear_skip_pass()
-                    if idx < len(stages):
+                    if checkpoint:
+                        mark_stage_done(checkpoint, idx, "skipped")
+                    if idx + 1 < len(stages):
                         self.tracker.log(
                             f"[yellow]{detail}[/] skipped — next crack stage",
                             tag=self.name,
                         )
                     continue
-                if idx < len(stages):
+                if self.should_stop():
+                    if checkpoint:
+                        save_checkpoint(checkpoint)
+                        self.tracker.log(
+                            "[yellow]Crack paused[/] — checkpoint saved for resume",
+                            tag="hashcat",
+                        )
+                    return None
+                if checkpoint:
+                    mark_stage_done(checkpoint, idx, "exhausted")
+                if idx + 1 < len(stages):
                     self.tracker.log(
                         f"[yellow]{detail}[/] exhausted — next crack stage",
                         tag=self.name,
                     )
+            # All stages finished without a key — drop checkpoint.
+            if checkpoint:
+                delete_checkpoint(data_dir, self.ap.bssid)
             return None
         finally:
             for path in cleanup:

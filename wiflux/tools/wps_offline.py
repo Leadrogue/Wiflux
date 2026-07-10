@@ -30,6 +30,22 @@ def _extract_pixie_fields(capfile: str, bssid: str) -> dict[str, str] | None:
     if code != 0 or not stdout.strip():
         return None
 
+    required_keys = ("pke", "pkr", "e_hash1", "e_hash2", "authkey", "e_nonce")
+    # Prefer a single complete tshark row (avoids mixing fields from different
+    # WPS exchanges). Fall back to merge only if no complete row exists.
+    for line in stdout.splitlines():
+        parts = line.split("|")
+        if len(parts) < 6:
+            continue
+        pke, pkr, h1, h2, auth, enonce = (p.strip() for p in parts[:6])
+        rnonce = parts[6].strip() if len(parts) > 6 else ""
+        fields = {
+            "pke": pke, "pkr": pkr, "e_hash1": h1, "e_hash2": h2,
+            "authkey": auth, "e_nonce": enonce, "r_nonce": rnonce,
+        }
+        if all(fields[k] for k in required_keys):
+            return fields
+
     fields = {
         "pke": "", "pkr": "", "e_hash1": "", "e_hash2": "",
         "authkey": "", "e_nonce": "", "r_nonce": "",
@@ -40,23 +56,22 @@ def _extract_pixie_fields(capfile: str, bssid: str) -> dict[str, str] | None:
             continue
         pke, pkr, h1, h2, auth, enonce = (p.strip() for p in parts[:6])
         rnonce = parts[6].strip() if len(parts) > 6 else ""
-        if pke:
+        if pke and not fields["pke"]:
             fields["pke"] = pke
-        if pkr:
+        if pkr and not fields["pkr"]:
             fields["pkr"] = pkr
-        if h1:
+        if h1 and not fields["e_hash1"]:
             fields["e_hash1"] = h1
-        if h2:
+        if h2 and not fields["e_hash2"]:
             fields["e_hash2"] = h2
-        if auth:
+        if auth and not fields["authkey"]:
             fields["authkey"] = auth
-        if enonce:
+        if enonce and not fields["e_nonce"]:
             fields["e_nonce"] = enonce
-        if rnonce:
+        if rnonce and not fields["r_nonce"]:
             fields["r_nonce"] = rnonce
 
-    required = ("pke", "pkr", "e_hash1", "e_hash2", "authkey", "e_nonce")
-    if not all(fields[k] for k in required):
+    if not all(fields[k] for k in required_keys):
         return None
     return fields
 

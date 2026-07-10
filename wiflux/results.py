@@ -50,35 +50,42 @@ class ResultStore:
                 )
             """)
 
+    @staticmethod
+    def _norm_bssid(bssid: str) -> str:
+        return (bssid or "").replace("-", ":").upper()
+
     def save_crack(self, result: CrackResult) -> None:
         now = datetime.now(timezone.utc).isoformat()
+        bssid = self._norm_bssid(result.bssid)
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 """INSERT OR REPLACE INTO cracks
                    (bssid, essid, key, method, capture_file, cracked_at)
                    VALUES (?, ?, ?, ?, ?, ?)""",
-                (result.bssid, result.essid, result.key, result.method,
+                (bssid, result.essid, result.key, result.method,
                  result.capture_file, result.cracked_at or now),
             )
 
     def is_cracked(self, bssid: str) -> bool:
+        key = self._norm_bssid(bssid)
         with sqlite3.connect(self.db_path) as conn:
             row = conn.execute(
-                "SELECT 1 FROM cracks WHERE bssid = ?", (bssid,)
+                "SELECT 1 FROM cracks WHERE upper(replace(bssid, '-', ':')) = ?",
+                (key,),
             ).fetchone()
         return row is not None
 
     def get_cracked_bssids(self) -> set[str]:
         with sqlite3.connect(self.db_path) as conn:
             rows = conn.execute("SELECT bssid FROM cracks").fetchall()
-        return {r[0] for r in rows}
+        return {self._norm_bssid(r[0]) for r in rows}
 
     def ignore(self, bssid: str, essid: str, reason: str = "user") -> None:
         now = datetime.now(timezone.utc).isoformat()
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO ignored VALUES (?, ?, ?, ?)",
-                (bssid, essid, reason, now),
+                (self._norm_bssid(bssid), essid, reason, now),
             )
 
     def list_ignored(self) -> list[tuple[str, str, str, str]]:

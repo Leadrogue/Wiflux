@@ -246,7 +246,8 @@ class TestAirodump(unittest.TestCase):
         row = ["FE:32:E8:12:1E:0A", "", "", "-42", "8", "92:B4:74:3A:F1:92"]
         Airodump._parse_client_row(row, clients_map, probing)
         self.assertEqual(len(clients_map["92:B4:74:3A:F1:92"]), 1)
-        self.assertEqual(clients_map["92:B4:74:3A:F1:92"][0].power, -42)
+        # dBm converted to airodump 0–100 scale (same as AP power)
+        self.assertEqual(clients_map["92:B4:74:3A:F1:92"][0].power, 58)
         self.assertEqual(clients_map["92:B4:74:3A:F1:92"][0].packets, 8)
         self.assertEqual(probing, [])
 
@@ -337,6 +338,37 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(tag_band_for_ap(37, cfg), "6")
         self.assertEqual(tag_band_for_ap(20, cfg), "6")
 
+    def test_parse_channel_spec_ch_prefix(self):
+        from wiflux.tools.radio import parse_channel_spec
+
+        self.assertEqual(parse_channel_spec("ch1,ch6,ch11"), [1, 6, 11])
+        self.assertEqual(parse_channel_spec("ch36-ch40"), [36, 37, 38, 39, 40])
+        self.assertEqual(parse_channel_spec("1,6,11"), [1, 6, 11])
+
+    def test_airodump_multi_channel_list(self):
+        cfg = WifluxConfig()
+        cfg.scan.interface = "wlan0mon"
+        cfg.scan.band_2ghz = True
+        cfg.scan.band_5ghz = False
+        cfg.scan.channels = "1,6,11"
+        args = airodump_band_args(cfg)
+        self.assertIn("-c", args)
+        idx = args.index("-c")
+        self.assertEqual(args[idx + 1], "1,6,11")
+
+    def test_airodump_5_and_6_combined_hop(self):
+        cfg = WifluxConfig()
+        cfg.scan.interface = "wlan0mon"
+        cfg.scan.band_2ghz = False
+        cfg.scan.band_5ghz = True
+        cfg.scan.band_6ghz = True
+        args = airodump_band_args(cfg)
+        self.assertIn("-C", args)
+        joined = ",".join(args)
+        # 5 GHz ch36 = 5180 MHz; 6 GHz ch1 = 5955 MHz
+        self.assertIn("5180", joined)
+        self.assertIn("5955", joined)
+
     def test_config_dirs_created(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = WifluxConfig()
@@ -417,7 +449,49 @@ class TestCLI(unittest.TestCase):
         parser = build_parser()
         cfg = args_to_config(parser.parse_args(["--6ghz"]))
         self.assertTrue(cfg.scan.band_6ghz)
-        self.assertTrue(cfg.scan.band_2ghz)
+        # --6ghz alone is exclusive 6 GHz (no forced 2.4)
+        self.assertFalse(cfg.scan.band_2ghz)
+        cfg2 = args_to_config(parser.parse_args(["--6ghz", "-2"]))
+        self.assertTrue(cfg2.scan.band_6ghz)
+        self.assertTrue(cfg2.scan.band_2ghz)
+
+    def test_pillage_does_not_force_auto_mode(self):
+        from wiflux.cli import build_parser, args_to_config
+        parser = build_parser()
+        cfg = args_to_config(parser.parse_args(["-p", "30"]))
+        self.assertEqual(cfg.scan.scan_time, 30)
+        self.assertFalse(cfg.auto_mode)
+        cfg2 = args_to_config(parser.parse_args(["--auto", "-p", "30"]))
+        self.assertTrue(cfg2.auto_mode)
+
+    def test_min_power_dbm_conversion(self):
+        from wiflux.cli import build_parser, args_to_config
+        parser = build_parser()
+        # Use = form so argparse does not treat -70 as a flag
+        cfg = args_to_config(parser.parse_args(["--min-power=-70"]))
+        self.assertEqual(cfg.scan.min_power, 30)  # -70 dBm → 30 on airodump scale
+
+    def test_hashcat_gpu_cpu_flags(self):
+        from wiflux.cli import build_parser, args_to_config
+        from wiflux.tools.hashcat import hashcat_backend_args
+
+        parser = build_parser()
+        cfg = args_to_config(parser.parse_args(["--gpu"]))
+        self.assertEqual(cfg.attack.hashcat_backend, "gpu")
+        args, summary = hashcat_backend_args(backend="gpu")
+        # GPU request uses -d (detected) or -D 2 (type filter)
+        self.assertTrue("-d" in args or "-D" in args)
+        self.assertIn("GPU", summary.upper())
+
+        cfg = args_to_config(parser.parse_args(["--cpu-only"]))
+        self.assertEqual(cfg.attack.hashcat_backend, "cpu")
+        args, summary = hashcat_backend_args(backend="cpu")
+        self.assertTrue("-d" in args or "-D" in args)
+        self.assertIn("CPU", summary.upper())
+
+        args, summary = hashcat_backend_args(backend="auto", devices="2")
+        self.assertIn("-d", args)
+        self.assertIn("2", args)
 
 
 class TestSmartWordlist(unittest.TestCase):
@@ -534,17 +608,19 @@ class TestTransitionMode(unittest.TestCase):
         self.assertTrue(detect_transition_mode("WPA2", "PSK SAE"))
         self.assertFalse(detect_transition_mode("WPA2", "PSK"))
 
-    def test_select_hash_prefers_wpa2(self):
-        from wiflux.tools.transition import select_hash_line
+    def test_select_hash_prefers_eapol_when_prefer_wpa2(self):
+        from wiflux.tools.transition import hash_frame_type, select_hash_line
 
         pairs = [
-            ("AA:BB:CC:DD:EE:FF", "WPA*01*hash*wpa3*mac"),
-            ("AA:BB:CC:DD:EE:FF", "WPA*02*hash*wpa2*mac"),
+            ("AA:BB:CC:DD:EE:FF", "WPA*01*hash*pmkid*mac"),
+            ("AA:BB:CC:DD:EE:FF", "WPA*02*hash*eapol*mac"),
         ]
         picked = select_hash_line(pairs, prefer_wpa2=True)
         self.assertEqual(picked[1].split("*")[1], "02")
+        self.assertEqual(hash_frame_type(picked[1]), "eapol")
+        self.assertEqual(hash_frame_type(pairs[0][1]), "pmkid")
 
-    def test_ap_crack_use_wpa3_transition(self):
+    def test_ap_crack_use_wpa3_always_false_for_passwords(self):
         ap = AccessPoint(
             bssid="AA:BB:CC:DD:EE:FF", channel=36, encryption=EncryptionType.WPA3,
             auth="PSK SAE", power=50, essid="Mixed", essid_known=True,
@@ -553,6 +629,11 @@ class TestTransitionMode(unittest.TestCase):
         self.assertTrue(ap.is_wpa3_sae)
         self.assertFalse(ap.crack_use_wpa3)
         self.assertEqual(ap.encryption_label, "WPA2/3-T")
+        pure = AccessPoint(
+            bssid="AA:BB:CC:DD:EE:00", channel=36, encryption=EncryptionType.WPA3,
+            auth="SAE", power=50, essid="W3", essid_known=True,
+        )
+        self.assertFalse(pure.crack_use_wpa3)
 
     def test_airodump_parse_transition_row(self):
         cfg = WifluxConfig()
@@ -565,7 +646,14 @@ class TestTransitionMode(unittest.TestCase):
         self.assertIsNotNone(ap)
         assert ap is not None
         self.assertTrue(ap.transition_mode)
+        self.assertEqual(ap.encryption, EncryptionType.WPA2)  # mixed → WPA2 base
         self.assertEqual(ap.encryption_label, "WPA2/3-T")
+
+    def test_process_run_timeout_no_raise(self):
+        from wiflux.process import run
+
+        stdout, stderr, code = run(["sleep", "5"], timeout=1)
+        self.assertEqual(code, -1)
 
     def test_transition_downgrade_cli_flag(self):
         from wiflux.cli import build_parser, args_to_config
@@ -968,6 +1056,34 @@ class TestCrackLadder(unittest.TestCase):
         rules = discover_hashcat_rules()
         self.assertIsInstance(rules, list)
 
+    def test_build_stages_no_duplicate_dictionary(self):
+        from wiflux.tools.crack_ladder import build_crack_stages
+
+        rockyou = "/usr/share/wordlists/rockyou.txt"
+        if not os.path.isfile(rockyou):
+            self.skipTest("rockyou not installed")
+        ap = AccessPoint(
+            bssid="AA:BB:CC:DD:EE:FF", channel=6, encryption=EncryptionType.WPA2,
+            auth="PSK", power=40, essid="Home", essid_known=True,
+        )
+        cfg = WifluxConfig()
+        cfg.attack.wordlist = rockyou
+        cfg.attack.crack_ladder = True
+        stages, cleanup = build_crack_stages(ap, cfg, rockyou, "rockyou.txt", None)
+        try:
+            plain = [s for s in stages if s.rules is None and "dictionary" in s.label.lower()]
+            # Only one plain full-dict stage (Full dictionary), not Dictionary + Full
+            full = [s for s in stages if s.label.startswith("Full dictionary")]
+            dict_named = [s for s in stages if s.label.startswith("Dictionary (")]
+            self.assertEqual(len(full), 1)
+            self.assertEqual(len(dict_named), 0)
+        finally:
+            for path in cleanup:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
     def test_crack_ladder_full_dict_before_rules(self):
         from wiflux.tools.crack_ladder import append_crack_ladder_stages
 
@@ -1021,6 +1137,262 @@ class TestCrackLadder(unittest.TestCase):
         tracker.request_skip()
         self.assertFalse(tracker.skip_requested())
         self.assertTrue(tracker.skip_pass_requested())
+
+
+class TestRockyouEnsure(unittest.TestCase):
+    def test_rockyou_status_ok_when_present(self):
+        from wiflux.dependencies import ROCKYOU_TXT, rockyou_status
+
+        if not os.path.isfile(ROCKYOU_TXT):
+            self.skipTest("rockyou.txt not installed on this system")
+        state, detail = rockyou_status()
+        self.assertEqual(state, "ok")
+        self.assertIn("rockyou.txt", detail)
+
+    def test_ensure_rockyou_unpacks_gz(self):
+        from wiflux import dependencies as dep
+
+        with tempfile.TemporaryDirectory() as tmp:
+            gz = os.path.join(tmp, "rockyou.txt.gz")
+            txt = os.path.join(tmp, "rockyou.txt")
+            import gzip
+            payload = b"password123\nletmein999\n"
+            with gzip.open(gz, "wb") as fh:
+                fh.write(payload)
+
+            old_txt, old_gz = dep.ROCKYOU_TXT, dep.ROCKYOU_GZ
+            dep.ROCKYOU_TXT = txt
+            dep.ROCKYOU_GZ = gz
+            try:
+                self.assertEqual(dep.rockyou_status()[0], "gz")
+                ok, msg = dep.ensure_rockyou()
+                self.assertTrue(ok)
+                self.assertTrue(os.path.isfile(txt))
+                with open(txt, "rb") as fh:
+                    self.assertEqual(fh.read(), payload)
+                self.assertEqual(dep.rockyou_status()[0], "ok")
+                self.assertIn("unpacked", msg.lower())
+            finally:
+                dep.ROCKYOU_TXT = old_txt
+                dep.ROCKYOU_GZ = old_gz
+
+    def test_ensure_rockyou_missing(self):
+        from wiflux import dependencies as dep
+
+        with tempfile.TemporaryDirectory() as tmp:
+            old_txt, old_gz = dep.ROCKYOU_TXT, dep.ROCKYOU_GZ
+            dep.ROCKYOU_TXT = os.path.join(tmp, "nope.txt")
+            dep.ROCKYOU_GZ = os.path.join(tmp, "nope.txt.gz")
+            try:
+                self.assertEqual(dep.rockyou_status()[0], "missing")
+                ok, msg = dep.ensure_rockyou()
+                self.assertFalse(ok)
+                self.assertIn("not found", msg.lower())
+            finally:
+                dep.ROCKYOU_TXT = old_txt
+                dep.ROCKYOU_GZ = old_gz
+
+
+class TestCrackCheckpoint(unittest.TestCase):
+    def test_create_load_delete_checkpoint(self):
+        from wiflux.tools.crack_checkpoint import (
+            create_checkpoint,
+            delete_checkpoint,
+            load_checkpoint,
+            mark_stage_done,
+            mark_stage_running,
+        )
+        from wiflux.tools.crack_ladder import CrackStage
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ap = AccessPoint(
+                bssid="AA:BB:CC:DD:EE:FF", channel=6, encryption=EncryptionType.WPA2,
+                auth="PSK", power=40, essid="HomeNet", essid_known=True,
+            )
+            wl = os.path.join(tmp, "wl.txt")
+            with open(wl, "w", encoding="utf-8") as fh:
+                fh.write("password123\nchangeme1\n")
+            stages = [
+                CrackStage(wl, "ESSID-smart (2)", candidates=2),
+                CrackStage(wl, "Full dictionary (wl.txt)", candidates=2),
+            ]
+            hash_line = (
+                "WPA*01*00*aabbccddeeff*112233445566*486f6d654e6574***"
+            )
+            cp = create_checkpoint(
+                ap, tmp, hash_line, stages,
+                method="handshake", capture_file="hs/test.cap",
+            )
+            self.assertTrue(cp.is_resumable())
+            self.assertTrue(os.path.isfile(cp.hash_file))
+            loaded = load_checkpoint(tmp, ap.bssid)
+            self.assertIsNotNone(loaded)
+            self.assertEqual(loaded.bssid, ap.bssid)
+            self.assertEqual(len(loaded.stages), 2)
+            mark_stage_running(loaded, 0)
+            mark_stage_done(loaded, 0, "exhausted")
+            self.assertEqual(loaded.stage_index, 1)
+            reloaded = load_checkpoint(tmp, ap.bssid)
+            self.assertEqual(reloaded.stage_index, 1)
+            delete_checkpoint(tmp, ap.bssid)
+            self.assertIsNone(load_checkpoint(tmp, ap.bssid))
+
+    def test_resume_prompt_yes_flag(self):
+        from wiflux.input import prompt_resume_crack
+        from wiflux.tools.crack_checkpoint import create_checkpoint
+        from wiflux.tools.crack_ladder import CrackStage
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ap = AccessPoint(
+                bssid="11:22:33:44:55:66", channel=1, encryption=EncryptionType.WPA2,
+                auth="PSK", power=30, essid="X", essid_known=True,
+            )
+            wl = os.path.join(tmp, "wl.txt")
+            open(wl, "w").write("password123\n")
+            cp = create_checkpoint(
+                ap, tmp, "WPA*01*00*aabb*ccdd*ee***",
+                [CrackStage(wl, "dict", candidates=1)],
+                method="pmkid",
+            )
+            cfg = WifluxConfig()
+            cfg.attack.yes_resume_crack = True
+            tracker = ProgressTracker()
+            self.assertTrue(prompt_resume_crack(cfg, cp, tracker))
+
+    def test_cli_checkpoint_flags(self):
+        from wiflux.cli import args_to_config, build_parser
+
+        parser = build_parser()
+        cfg = args_to_config(parser.parse_args([
+            "--no-crack-checkpoint", "--yes-resume-crack",
+        ]))
+        self.assertFalse(cfg.attack.crack_checkpoints)
+        self.assertTrue(cfg.attack.yes_resume_crack)
+
+
+class TestAttackSkipControls(unittest.TestCase):
+    def test_enable_skip_before_begin_attack_shows_hint(self):
+        """Orchestrator enables skip while mode is still idle/scan."""
+        tracker = ProgressTracker()
+        self.assertEqual(tracker.mode, "idle")
+        with patch("wiflux.input.input_available", return_value=True):
+            tracker.enable_skip_controls()
+        self.assertTrue(tracker._show_skip_hint)
+
+    def test_begin_attack_sets_skip_hint(self):
+        tracker = ProgressTracker()
+        ap = AccessPoint(
+            bssid="AA:BB:CC:DD:EE:FF", channel=6, encryption=EncryptionType.WPA2,
+            auth="PSK", power=40, essid="Home", essid_known=True,
+        )
+        with patch("wiflux.input.input_available", return_value=True):
+            tracker.begin_attack(1, 1, ap)
+        self.assertEqual(tracker.mode, "attack")
+        self.assertTrue(tracker._show_skip_hint)
+
+    def test_suspend_live_restores_skip_in_attack_mode(self):
+        tracker = ProgressTracker()
+        ap = AccessPoint(
+            bssid="AA:BB:CC:DD:EE:FF", channel=6, encryption=EncryptionType.WPA2,
+            auth="PSK", power=40, essid="Home", essid_known=True,
+        )
+        with patch("wiflux.input.input_available", return_value=True):
+            tracker.begin_attack(1, 1, ap)
+            # Simulate bug condition: hint false but still in attack phase
+            tracker._show_skip_hint = False
+            tracker._skip_listener = None
+            with tracker.suspend_live():
+                pass
+            self.assertTrue(tracker._show_skip_hint)
+
+    def test_space_skips_attack_when_mode_attack(self):
+        tracker = ProgressTracker()
+        tracker.mode = "attack"
+        tracker.update_attack("pmkid", "capture", "listening")
+        tracker.handle_space()
+        self.assertTrue(tracker.skip_requested())
+
+
+class TestScanPause(unittest.TestCase):
+    def test_handle_space_toggles_scan_pause(self):
+        tracker = ProgressTracker()
+        tracker.begin_scan(scan_limit=30)
+        self.assertFalse(tracker.is_scan_paused())
+
+        tracker.handle_space()
+        self.assertTrue(tracker.is_scan_paused())
+        self.assertTrue(tracker.scan_paused)
+
+        tracker.handle_space()
+        self.assertFalse(tracker.is_scan_paused())
+
+    def test_handle_space_attack_still_skips(self):
+        tracker = ProgressTracker()
+        tracker.mode = "attack"
+        tracker.update_attack("handshake", "capture", "listening")
+        tracker.handle_space()
+        self.assertTrue(tracker.skip_requested())
+        self.assertFalse(tracker.scan_paused)
+
+    def test_pause_freezes_elapsed(self):
+        tracker = ProgressTracker()
+        tracker.begin_scan(scan_limit=60)
+        tracker.tick_scan()
+        tracker.handle_space()  # pause
+        frozen = tracker.scan_elapsed
+        time.sleep(0.25)
+        tracker.tick_scan()  # must not advance while paused
+        self.assertAlmostEqual(tracker.scan_elapsed, frozen, places=2)
+        tracker.handle_space()  # resume
+        time.sleep(0.15)
+        tracker.tick_scan()
+        self.assertGreaterEqual(tracker.scan_elapsed, frozen)
+
+    def test_update_scan_ignored_while_paused(self):
+        tracker = ProgressTracker()
+        tracker.begin_scan()
+        ap = AccessPoint(
+            bssid="AA:BB:CC:DD:EE:FF", channel=6, encryption=EncryptionType.WPA2,
+            auth="PSK", power=40, essid="Home", essid_known=True,
+        )
+        tracker.update_scan([ap])
+        self.assertEqual(len(tracker.targets), 1)
+
+        tracker.handle_space()
+        other = AccessPoint(
+            bssid="11:22:33:44:55:66", channel=1, encryption=EncryptionType.WPA2,
+            auth="PSK", power=20, essid="Other", essid_known=True,
+        )
+        tracker.update_scan([ap, other])
+        self.assertEqual(len(tracker.targets), 1)
+        self.assertEqual(tracker.targets[0].bssid, "AA:BB:CC:DD:EE:FF")
+
+    def test_paused_render_mentions_space_resume(self):
+        tracker = ProgressTracker()
+        tracker.begin_scan()
+        tracker._show_scan_pause_hint = True
+        tracker.update_scan([
+            AccessPoint(
+                bssid="AA:BB:CC:DD:EE:FF", channel=6, encryption=EncryptionType.WPA2,
+                auth="PSK", power=40, essid="Home", essid_known=True,
+            ),
+        ])
+        tracker.handle_space()
+        # Render without a Live display; ensure pause copy UI is present.
+        group = tracker.render()
+        self.assertIsNotNone(group)
+        # Panel + header path exercised; pause flag must still be set.
+        self.assertTrue(tracker.scan_paused)
+        text = tracker._compact_status()
+        self.assertIn("PAUSED", text)
+        self.assertIn("Space", text)
+
+    def test_scanning_header_shows_space_pause_hint(self):
+        tracker = ProgressTracker()
+        tracker.begin_scan()
+        tracker._show_scan_pause_hint = True
+        text = tracker._compact_status()
+        self.assertIn("Space=pause", text)
 
 
 class TestHandshakeBandStalk(unittest.TestCase):

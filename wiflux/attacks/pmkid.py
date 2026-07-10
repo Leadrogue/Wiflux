@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from ..models import CrackResult, EncryptionType, PMKIDCaptureInfo
 from ..tools.pmkid_capture import capture_pmkid_extended
-from ..tools.transition import hash_key_type, strategy_summary, transition_downgrade_enabled
+from ..tools.transition import hash_frame_type, strategy_summary, transition_downgrade_enabled
 from ..tools.interface import recover_interface
 from .base import Attack, AttackResult
 
@@ -86,7 +86,7 @@ class PMKIDAttack(Attack):
             channel=self.ap.channel,
             bssid=self.ap.bssid,
             essid=self.ap.display_name,
-            hash_type=hash_key_type(hash_line),
+            hash_type=hash_frame_type(hash_line),
             source=source,
             show_banner=True,
         )
@@ -196,12 +196,25 @@ class PMKIDAttack(Attack):
         if not self._confirm_pmkid(hash_line, capture_file, source=pmkid_source):
             return AttackResult(False, message="PMKID confirmation failed")
 
-        key = self.crack_hashcat(hash_line, started)
+        key = self.crack_hashcat(
+            hash_line,
+            started,
+            method="pmkid",
+            capture_file=capture_file,
+        )
         if self.should_stop():
             return self.skipped_result()
         if key:
+            from ..tools.transition import bssid_from_hash_line
+            crack_bssid = (bssid_from_hash_line(hash_line) or self.ap.bssid).upper()
+            if crack_bssid != self.ap.bssid.upper():
+                self.tracker.log(
+                    f"Key applies to hash BSSID [cyan]{crack_bssid}[/] "
+                    f"(selected [dim]{self.ap.bssid}[/] — sibling/band rotate)",
+                    tag="pmkid",
+                )
             crack = CrackResult(
-                bssid=self.ap.bssid, essid=self.ap.display_name, key=key,
+                bssid=crack_bssid, essid=self.ap.display_name, key=key,
                 method="pmkid", capture_file=capture_file,
                 cracked_at=datetime.now(timezone.utc).isoformat(),
             )

@@ -36,7 +36,14 @@ class Airodump:
     ):
         self.cfg = cfg
         self.interface = cfg.scan.interface
-        self.channel = channel or (int(cfg.scan.channels.split(",")[0]) if cfg.scan.channels and "," not in cfg.scan.channels and "-" not in cfg.scan.channels else None)
+        from .radio import parse_channel_spec
+        channel_list = parse_channel_spec(cfg.scan.channels) if cfg.scan.channels else []
+        if channel is not None:
+            self.channel = channel
+        elif len(channel_list) == 1:
+            self.channel = channel_list[0]
+        else:
+            self.channel = None
         self.band = band
         self.bssid = bssid
         self.prefix = prefix
@@ -202,8 +209,14 @@ class Airodump:
         channel = int(fields[3].strip()) if fields[3].strip().lstrip("-").isdigit() else 0
         privacy = fields[5].strip()
         auth = fields[7].strip()
-        power = int(fields[8].strip())
-        if power < 0:
+        power_raw = fields[8].strip()
+        power = int(power_raw) if power_raw.lstrip("-").isdigit() or (
+            power_raw.startswith("-") and power_raw[1:].isdigit()
+        ) else -1
+        # airodump uses -1 for N/A; real dBm is typically -20..-100 → 0..100 scale.
+        if power == -1:
+            power = 0  # unknown — do not treat as strongest (was 99 via +100)
+        elif power < 0:
             power += 100
 
         enc = self._parse_encryption(privacy)
@@ -233,9 +246,15 @@ class Airodump:
     @staticmethod
     def _parse_encryption(privacy: str) -> EncryptionType:
         p = privacy.upper()
-        if "WPA3" in p:
+        has_wpa3 = "WPA3" in p
+        has_wpa2 = "WPA2" in p
+        # Transition / mixed: treat as WPA2 so --wpa still includes them;
+        # transition_mode flag carries the mixed-mode detail.
+        if has_wpa2 and has_wpa3:
+            return EncryptionType.WPA2
+        if has_wpa3:
             return EncryptionType.WPA3
-        if "WPA2" in p:
+        if has_wpa2:
             return EncryptionType.WPA2
         if "WPA" in p:
             return EncryptionType.WPA
@@ -254,7 +273,18 @@ class Airodump:
         station = fields[0].strip().upper()
         if not _BSSID_RE.match(station):
             return None
-        power = int(fields[3].strip()) if fields[3].strip().lstrip("-").isdigit() else 0
+        power_raw = fields[3].strip()
+        # Match AP power handling: unknown/empty → -1 (not heard), not 0.
+        if power_raw.lstrip("-").isdigit() or (
+            power_raw.startswith("-") and power_raw[1:].isdigit()
+        ):
+            power = int(power_raw)
+            if power == -1:
+                power = -1
+            elif power < 0:
+                power = power + 100
+        else:
+            power = -1
         packets = int(fields[4].strip()) if len(fields) > 4 and fields[4].strip().isdigit() else 0
         return Client(station=station, power=power, packets=packets)
 

@@ -31,7 +31,9 @@ class WEPAttack(Attack):
         self.status("capture", "Starting WEP ARP-replay...", timeout=timeout, started=started)
         self.tracker.log(f"WEP attack on {self.ap.display_name}", tag="wep")
 
-        iface = recover_interface(self.cfg.scan.interface, self.ap.channel)
+        iface = recover_interface(
+            self.cfg.scan.interface, self.ap.channel, band=self.ap.radio_band,
+        )
         self.cfg.scan.interface = iface
 
         capfile: str | None = None
@@ -108,9 +110,9 @@ class WEPAttack(Attack):
         self.status("failed", "Insufficient IVs or crack failed", started=started)
         return AttackResult(False, message="WEP attack failed")
 
-    @staticmethod
-    def _try_crack(capfile: str) -> str | None:
-        stdout, _, _ = run(["aircrack-ng", capfile], timeout=120)
+    def _try_crack(self, capfile: str) -> str | None:
+        cmd = ["aircrack-ng", "-b", self.ap.bssid, capfile]
+        stdout, _, _ = run(cmd, timeout=120)
         for line in stdout.splitlines():
             if "KEY FOUND" in line.upper():
                 parts = line.split()

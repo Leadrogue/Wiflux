@@ -64,27 +64,27 @@ Download the latest release from **[GitHub Releases](https://github.com/Leadrogu
 Includes the wheel, install script, and quick-start docs:
 
 ```bash
-tar -xzf wiflux-1.0.4-linux-installer.tar.gz
-cd wiflux-1.0.4-linux-installer
+tar -xzf wiflux-1.0.5-linux-installer.tar.gz
+cd wiflux-1.0.5-linux-installer
 ./install.sh
 ```
 
 ### Option B — pip from wheel
 
 ```bash
-pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.3/wiflux-1.0.4-py3-none-any.whl --break-system-packages
+pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.5/wiflux-1.0.5-py3-none-any.whl --break-system-packages
 ```
 
 ### Option C — pip from source tarball
 
 ```bash
-pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.3/wiflux-1.0.4.tar.gz --break-system-packages
+pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.5/wiflux-1.0.5.tar.gz --break-system-packages
 ```
 
 ### Verify checksums
 
 ```bash
-sha256sum -c wiflux-1.0.4-checksums.sha256
+sha256sum -c wiflux-1.0.5-checksums.sha256
 ```
 
 See [docs/RELEASE.md](docs/RELEASE.md) for full release details.

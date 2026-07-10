@@ -2,10 +2,30 @@
 
 from __future__ import annotations
 
+import random
 import time
 
-from ..process import ProcessPool, run
+from ..process import ProcessPool, run, which
 from .airmon import Airmon
+
+
+def randomize_mac(iface: str) -> str | None:
+    """Set a random locally-administered unicast MAC on *iface*. Returns new MAC or None."""
+    if not iface or not which("ip"):
+        return None
+    # Locally administered, unicast: set bit1 of first octet, clear multicast bit.
+    first = random.randint(0x00, 0xFF) | 0x02
+    first &= 0xFE
+    mac = [first] + [random.randint(0x00, 0xFF) for _ in range(5)]
+    mac_str = ":".join(f"{b:02x}" for b in mac)
+    _, _, c1 = run(["ip", "link", "set", "dev", iface, "down"], timeout=5)
+    _, _, c2 = run(
+        ["ip", "link", "set", "dev", iface, "address", mac_str], timeout=5,
+    )
+    run(["ip", "link", "set", "dev", iface, "up"], timeout=5)
+    if c1 != 0 or c2 != 0:
+        return None
+    return mac_str
 
 
 def find_monitor_interface(preferred: str) -> str | None:

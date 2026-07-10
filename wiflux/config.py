@@ -11,9 +11,13 @@ from typing import Optional
 
 DEFAULT_WORDLISTS = [
     "/usr/share/wordlists/rockyou.txt",
+    "/usr/share/seclists/Passwords/Leaked-Databases/rockyou.txt",
+    "/usr/share/seclists/Passwords/Common-Credentials/10-million-password-list-top-1000000.txt",
     "/usr/share/wordlists/fern-wifi/common.txt",
     "/usr/share/dict/wordlist-probable.txt",
+    "/usr/share/dict/rockyou.txt",
     "/usr/share/john/password.lst",
+    "/usr/share/wordlists/fasttrack.txt",
 ]
 
 
@@ -21,7 +25,7 @@ def find_wordlist(custom: Optional[str] = None) -> Optional[str]:
     if custom and os.path.isfile(custom):
         return custom
     for path in DEFAULT_WORDLISTS:
-        if os.path.isfile(path):
+        if os.path.isfile(path) and os.path.getsize(path) > 0:
             return path
     return None
 
@@ -92,6 +96,13 @@ class AttackConfig:
     pmkid_band_rotate: bool = True
     client_band_stalk: bool = True
     crack_ladder: bool = True
+    crack_checkpoints: bool = True  # durable hashcat resume across restarts
+    yes_resume_crack: bool = False  # auto-accept resume prompt
+    # hashcat backend: auto = GPU if available else CPU; gpu/cpu/all; devices = "-d" list
+    hashcat_backend: str = "auto"
+    hashcat_devices: str = ""  # e.g. "1" or "1,2" for --backend-devices
+    hashcat_workload: int = 3  # hashcat -w (1=low … 4=nightmare)
+    hashcat_force: bool = True  # pass --force (ignore driver warnings)
 
 
 @dataclass
@@ -133,6 +144,13 @@ class WifluxConfig:
                 for k, v in values.items():
                     if hasattr(section_obj, k):
                         setattr(section_obj, k, v)
+        # Re-normalize resolved paths / create dirs after load.
+        cfg.output.data_dir = str(Path(cfg.output.data_dir).resolve())
+        cfg.output.handshake_dir = str(Path(cfg.output.handshake_dir).resolve())
+        Path(cfg.output.data_dir).mkdir(parents=True, exist_ok=True)
+        Path(cfg.output.handshake_dir).mkdir(parents=True, exist_ok=True)
+        if cfg.attack.wordlist is None:
+            cfg.attack.wordlist = find_wordlist()
         return cfg
 
     def save(self, path: str) -> None:

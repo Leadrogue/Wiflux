@@ -101,18 +101,31 @@ class ManagedProcess:
 
 
 def run(cmd: list[str] | str, *, shell: bool = False, timeout: int = 60) -> tuple[str, str, int]:
-    """Run command and return (stdout, stderr, returncode)."""
+    """Run command and return (stdout, stderr, returncode).
+
+    On timeout, returns partial output with returncode ``-1`` instead of raising.
+    """
     use_shell = shell or (isinstance(cmd, str) and " " in cmd)
-    result = subprocess.run(
-        cmd,
-        shell=use_shell,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
-    return result.stdout, result.stderr, result.returncode
+    try:
+        result = subprocess.run(
+            cmd,
+            shell=use_shell,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        return result.stdout, result.stderr, result.returncode
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout or ""
+        stderr = exc.stderr or ""
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode("utf-8", errors="replace")
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", errors="replace")
+        return stdout, stderr, -1
 
 
 def which(name: str) -> bool:
-    _, _, code = run(["which", name])
-    return code == 0
+    """True if *name* is an executable on PATH (uses shutil, not the which binary)."""
+    import shutil
+    return shutil.which(name) is not None

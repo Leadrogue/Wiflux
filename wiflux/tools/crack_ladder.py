@@ -140,8 +140,11 @@ def build_crack_stages(
     if wl_label.startswith("smart:"):
         count = wl_label.split(":", 1)[1]
         stages.append(CrackStage(wordlist, f"ESSID-smart ({count})"))
-    else:
+    elif not cfg.attack.crack_ladder:
+        # No ladder: single dictionary pass only.
         stages.append(CrackStage(wordlist, f"Dictionary ({wl_label})"))
+    # When crack_ladder is on and this is already the main dict, skip the
+    # plain Dictionary stage — append_crack_ladder_stages adds Full dictionary.
 
     if cfg.attack.crack_ladder:
         vendor = write_vendor_wordlist(ap, cfg)
@@ -150,7 +153,9 @@ def build_crack_stages(
             cleanup.append(vpath)
             stages.append(CrackStage(vpath, f"Vendor defaults ({vcount})"))
         tuple_stages: list[tuple[str, str, str | None]] = []
-        append_crack_ladder_stages(tuple_stages, cfg.attack.wordlist)
+        # Prefer configured full dictionary for ladder; fall back to this pass's list.
+        ladder_wl = cfg.attack.wordlist if cfg.attack.wordlist else wordlist
+        append_crack_ladder_stages(tuple_stages, ladder_wl or wordlist)
         for wl_path, detail, rules in tuple_stages:
             stages.append(CrackStage(wl_path, detail, rules))
 

@@ -23,21 +23,24 @@
 
 ## Features
 
-- **Live Rich UI** — Real-time scan table with signal, encryption, WPS status, clients, and priority scoring
-- **Matrix welcome screen** — Optional splash with dependency check (`--no-splash` to skip)
+- **Live Rich UI** — Real-time scan table with ESSID, BSSID, **GHz**, channel, encryption, WPS, clients, and priority scoring
+- **Matrix welcome + dependency check** — Splash, then tools/rockyou verification with optional apt install and auto-unpack of `rockyou.txt.gz`
+- **Scan pause** — **Space** freezes the live table for copy; Space resumes
 - **ESSID-smart wordlist** — Targeted candidates from network name + vendor before rockyou (preview, up to 100k)
 - **Crack ladder** — ESSID-smart → vendor defaults → full dictionary → hashcat rules (fastest-to-longest); Space skips a pass (`--no-crack-ladder`)
+- **Hashcat GPU/CPU control** — Auto-prefer GPU when available; `--gpu`, `--cpu-only`, `--hashcat-devices`
+- **Durable crack checkpoints** — Resume hashcat after restart under `wiflux-data/crack_checkpoints/`
 - **Adaptive deauth** — Handshake capture tunes burst/listen timing from live capture health (`--no-adaptive-deauth`)
 - **Multi-backend deauth** — mdk4, aireplay-ng, bettercap, mdk3 (`--deauth-tools`, `--deauth-combo`)
 - **PMKID enhancements** — Passive-first capture, dual-band rotation, success screen before cracking
 - **WPS enhancements** — Algorithmic PIN pre-pass, offline pixiewps from scan caps
 - **WPA2/WPA3 transition** — Prefer WPA2 capture/crack on mixed-mode APs (`--no-transition-downgrade`)
-- **6 GHz scanning** — `--6ghz` for Wi-Fi 6E (adapter-dependent)
+- **2.4 / 5 / 6 GHz scanning** — Exclusive high-band with `--5ghz` / `--6ghz`; add `-2` to combine
 - **Client band-stalk** — Post-deauth listen on sibling bands for roaming stations
 - **Handshake validation** — Full capture check with on-screen confirm before hashcat
 - **Hidden SSID decloak** — Deauth probe to reveal cloaked ESSIDs during scan
 - **SQLite results store** — Track cracked networks; skip by default (`--no-ignore-cracked` to re-attack)
-- **92 automated tests** — No live radio required for CI
+- **116 automated tests** — No live radio required for CI
 
 ### Supported attacks
 
@@ -55,19 +58,19 @@
 
 ### Install from release (recommended)
 
-Download **[v1.0.4](https://github.com/Leadrogue/Wiflux/releases/tag/v1.0.4)**:
+Download **[v1.0.5](https://github.com/Leadrogue/Wiflux/releases/tag/v1.0.5)**:
 
 ```bash
-curl -LO https://github.com/Leadrogue/Wiflux/releases/download/v1.0.4/wiflux-1.0.4-linux-installer.tar.gz
-tar -xzf wiflux-1.0.4-linux-installer.tar.gz
-cd wiflux-1.0.4-linux-installer
+curl -LO https://github.com/Leadrogue/Wiflux/releases/download/v1.0.5/wiflux-1.0.5-linux-installer.tar.gz
+tar -xzf wiflux-1.0.5-linux-installer.tar.gz
+cd wiflux-1.0.5-linux-installer
 ./install.sh
 ```
 
 Or install directly with pip:
 
 ```bash
-pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.4/wiflux-1.0.4-py3-none-any.whl --break-system-packages
+pip install https://github.com/Leadrogue/Wiflux/releases/download/v1.0.5/wiflux-1.0.5-py3-none-any.whl --break-system-packages
 ```
 
 ### Install from source
@@ -132,7 +135,7 @@ wiflux --check capture.cap
 wiflux --export results.json
 ```
 
-### Key options (v1.0.4)
+### Key options (v1.0.5)
 
 | Flag | Description |
 |------|-------------|
@@ -140,8 +143,11 @@ wiflux --export results.json
 | `--kill` / `--restore` | Kill interfering processes / restore managed mode |
 | `-p SECONDS` | Auto-attack after N seconds of scanning |
 | `--auto` | Non-interactive mode |
-| `-5` / `--5ghz` | Include 5 GHz channels |
-| `--6ghz` | Include 6 GHz (Wi-Fi 6E) |
+| `-5` / `--5ghz` | 5 GHz only (add `-2` for dual-band) |
+| `--6ghz` | 6 GHz only (add `-2`/`-5` to combine) |
+| `-c CH` | Channel list (`1,6,11` or `ch36,ch40`) |
+| `--gpu` / `--cpu-only` | Hashcat GPU or CPU only (default: auto GPU) |
+| `--hashcat-devices IDS` | Hashcat `-d` device list |
 | `--no-ignore-cracked` | Show networks already in crack database |
 | `--new-hs` | Ignore saved handshakes; force live capture |
 | `--no-transition-downgrade` | Do not prefer WPA2 on WPA2+WPA3 APs |
@@ -175,6 +181,15 @@ python -m pytest tests/test_wiflux.py -q
 - Wi-Fi adapter with monitor mode + injection
 - [aircrack-ng](https://www.aircrack-ng.org/) (required)
 - [reaver](https://github.com/t6x/reaver-wps-fork-t6x), [hcxdumptool](https://github.com/ZerBea/hcxdumptool), [hashcat](https://hashcat.net/hashcat/), [pixiewps](https://github.com/wiire-a/pixiewps), [tshark](https://www.wireshark.org/) (optional, recommended)
+
+---
+
+## Credits
+
+Thanks to **[Murlocdouche](https://github.com/Murlocdouche)** for:
+
+- Suggesting the scan-table **GHz** column (band at a glance between BSSID and CH)
+- Identifying that hashcat could not be steered to the **GPU** for cracking (now fixed with auto GPU preference and `--gpu` / `--cpu-only` / `--hashcat-devices`)
 
 ---
 

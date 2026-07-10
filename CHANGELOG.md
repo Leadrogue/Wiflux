@@ -6,6 +6,65 @@ All notable changes to **Wiflux** are documented here.
 
 _(nothing yet)_
 
+## [1.0.5] — 2026-07-10
+
+### Highlights
+
+- **Dependency check screen** — post-splash panel verifies tools + rockyou; auto-unpacks `rockyou.txt.gz` when needed; Space continues, Ctrl+C quits cleanly
+- **Hashcat GPU/CPU control** — auto-prefer GPU when available; `--gpu`, `--cpu-only`, `--hashcat-devices`, `--hashcat-backend`, `--hashcat-workload`
+- **Durable crack checkpoints** — hashcat progress survives restart; resume prompt when re-entering crack
+- **Scan pause** — Space freezes live scan for copy; resume with Space
+- **GHz column** on the scan table (between BSSID and CH)
+- **Major reliability fixes** — WPA3 password mode 22000, PMKID/EAPOL typing, multi-channel `-c`, 5+6 GHz hop, band exclusivity, and many more
+
+### Credits
+
+Thanks to **[Murlocdouche](https://github.com/Murlocdouche)** for suggesting the scan-table **GHz** column and for identifying that hashcat could not be steered to the **GPU** for cracking.
+
+### Added
+
+- Dependency check UI with rockyou detection/unpack
+- Deauth tools on dependency list: mdk4, bettercap, mdk3
+- Scan Space pause/resume for text selection
+- Hashcat crack checkpoints under `wiflux-data/crack_checkpoints/`
+- `--gpu` / `--cpu-only` / `--hashcat-backend` / `--hashcat-devices` / `--hashcat-workload` / `--no-hashcat-force`
+- Scan table **GHz** column
+- `--random-mac` implementation (ip link)
+- Channel `ch` prefix support (`ch1,ch6`, `ch36-ch40`)
+
+### Changed
+
+- `--5ghz` / `--6ghz` alone no longer force 2.4 GHz (add `-2` to combine)
+- `-p` / `--pillage` no longer implies `--auto` (use `--auto` for unattended)
+- `--min-power` accepts dBm (`--min-power=-70`) or 0–100 scale
+- Crack ladder no longer double-runs the main dictionary when ladder is enabled
+- Transition APs parse as WPA2 + transition flag so `--wpa` still lists them
+- Decloak only retunes radio on fixed-channel scans; band-aware when it does
+
+### Fixes
+
+- Pure WPA3 no longer uses hashcat **22001** (PMK mode) for password wordlists
+- Hash field `01`/`02` correctly treated as **PMKID / EAPOL** (not WPA2/WPA3)
+- Keep multiple hash lines per BSSID; crack attributed to hash BSSID when different
+- Airodump PWR **-1** no longer ranks as 99
+- Multi-channel lists and 5+6 GHz combined hops applied correctly
+- `/dev/tty` opens with `O_RDWR` (prompts + Space listener)
+- Restart after apt install no longer dies on namespace package shadow (`python -m wiflux` from wrong cwd)
+- Space skip hint restored after handshake/PMKID prompts
+- Hashcat ProcessPool unregister + wall-clock stage timeout
+- `process.run` soft-handles timeouts; more wordlist search paths; WEP `-b`; case-normalized cracked BSSIDs
+
+### Install
+
+```bash
+curl -LO https://github.com/Leadrogue/Wiflux/releases/download/v1.0.5/wiflux-1.0.5-linux-installer.tar.gz
+tar -xzf wiflux-1.0.5-linux-installer.tar.gz
+cd wiflux-1.0.5-linux-installer
+./install.sh
+```
+
+---
+
 ## [1.0.4] — 2026-07-07
 
 ### Highlights
@@ -237,6 +296,7 @@ Initial public release.
 
 > For authorized security testing only.
 
+[1.0.5]: https://github.com/Leadrogue/Wiflux/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/Leadrogue/Wiflux/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/Leadrogue/Wiflux/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/Leadrogue/Wiflux/compare/v1.0.1...v1.0.2
